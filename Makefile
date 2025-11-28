@@ -24,10 +24,10 @@ install-testmqtt:
 
 conformance-v3: install-testmqtt ## Run MQTT 3.1.1 Conformance Tests
 	@echo "Running MQTT 3.1.1 Conformance Tests..."
-	@testmqtt conformance --version 3
+	@testmqtt conformance --version 3 --verbose
 
 conformance-v5: install-testmqtt ## Run MQTT 5.0 Conformance Tests
 	@echo "Running MQTT 5.0 Conformance Tests..."
-	@testmqtt conformance --version 5
+	@testmqtt conformance --version 5 --verbose
 
 conformance: conformance-v3 conformance-v5 ## Run all Conformance Tests
