@@ -89,9 +89,10 @@ func (l *Listener) acceptLoop() {
 
 // Server combines the broker with listeners for easy setup.
 type Server struct {
-	Broker    *Broker
-	listeners []*Listener
-	mu        sync.Mutex
+	Broker       *Broker
+	listeners    []*Listener
+	wsListeners  []*WebSocketListener
+	mu           sync.Mutex
 }
 
 // NewServer creates a new server with the given configuration.
@@ -129,6 +130,35 @@ func (s *Server) ListenTLS(addr string, config *tls.Config) error {
 	return nil
 }
 
+// ListenWebSocket adds a WebSocket listener.
+// The path parameter specifies the URL path (default: "/mqtt").
+func (s *Server) ListenWebSocket(addr, path string) error {
+	l, err := s.Broker.ListenWebSocket(addr, path)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.wsListeners = append(s.wsListeners, l)
+	s.mu.Unlock()
+
+	return nil
+}
+
+// ListenWebSocketTLS adds a TLS WebSocket listener.
+func (s *Server) ListenWebSocketTLS(addr, path string, config *tls.Config) error {
+	l, err := s.Broker.ListenWebSocketTLS(addr, path, config)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.wsListeners = append(s.wsListeners, l)
+	s.mu.Unlock()
+
+	return nil
+}
+
 // AddHook registers a hook with the broker.
 // The config parameter is hook-specific configuration (can be nil).
 func (s *Server) AddHook(hook Hook, config any) error {
@@ -140,6 +170,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// Close all listeners first
 	s.mu.Lock()
 	for _, l := range s.listeners {
+		l.Close()
+	}
+	for _, l := range s.wsListeners {
 		l.Close()
 	}
 	s.mu.Unlock()
