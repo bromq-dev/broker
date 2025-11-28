@@ -1,8 +1,12 @@
-// Example: Clustered broker using Redis/Valkey for cross-node communication.
+// Example: Clustered broker using Redis/Valkey for distributed state.
 //
-// This example demonstrates running multiple broker nodes that share state
-// via Redis. Messages published to one node are delivered to subscribers
-// on all nodes.
+// This example demonstrates running multiple broker nodes that share full
+// distributed state via Redis/Valkey, including:
+//   - Node registry with heartbeat and auto-expiry
+//   - Session persistence across nodes
+//   - Subscription storage and route index for targeted fan-out
+//   - Offline message queue using Redis Streams
+//   - Retained message storage with index
 //
 // Usage:
 //
@@ -19,6 +23,11 @@
 //	mosquitto_sub -p 1883 -t "test/#" &
 //	mosquitto_pub -p 1884 -t "test/hello" -m "from node2"
 //	# Subscriber on node1 receives the message!
+//
+// With Docker Compose:
+//
+//	cd examples/cluster
+//	docker compose up -d
 package main
 
 import (
@@ -42,8 +51,12 @@ func main() {
 	flag.Parse()
 
 	if *nodeID == "" {
-		// Generate a unique node ID if not provided
-		*nodeID = fmt.Sprintf("node-%d", os.Getpid())
+		// Default to hostname (container ID in Docker, pod name in K8s)
+		if hostname, err := os.Hostname(); err == nil {
+			*nodeID = hostname
+		} else {
+			*nodeID = fmt.Sprintf("node-%d", os.Getpid())
+		}
 	}
 
 	// Configure logging
@@ -52,16 +65,13 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	// Create broker
-	b := broker.New(&broker.Config{
-		RetainAvailable: true,
-	})
+	// Create broker with full capabilities
+	b := broker.New(nil)
 
-	// Add Redis hook for clustering
-	if err := b.AddHook(new(hooks.RedisHook), &hooks.RedisConfig{
-		Addr:      *redisAddr,
-		KeyPrefix: "mqtt:",
-		NodeID:    *nodeID,
+	// Add cluster hook for full distributed state
+	if err := b.AddHook(new(hooks.ClusterHook), &hooks.ClusterConfig{
+		Addr:   *redisAddr,
+		NodeID: *nodeID,
 	}); err != nil {
 		slog.Error("Failed to connect to Redis", "error", err, "addr", *redisAddr)
 		slog.Info("Make sure Redis is running: docker run -d -p 6379:6379 redis:alpine")
@@ -93,7 +103,7 @@ func main() {
 		"node_id", *nodeID,
 		"redis", *redisAddr,
 	)
-	slog.Info("Features: Redis-backed retained messages, cross-node pub/sub")
+	slog.Info("Features: session persistence, targeted fan-out, offline queues, retained messages")
 
 	// Wait for shutdown
 	sig := make(chan os.Signal, 1)

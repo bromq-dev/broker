@@ -1,0 +1,32 @@
+services:
+  valkey:
+    image: valkey/valkey:9
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  node1:
+    build:
+      context: ../..
+      dockerfile: examples/cluster/Dockerfile
+    command: ["-redis", "valkey:6379"]
+    ports:
+      - "1883:1883"
+    depends_on:
+      valkey:
+        condition: service_healthy
+
+  node2:
+    build:
+      context: ../..
+      dockerfile: examples/cluster/Dockerfile
+    command: ["-redis", "valkey:6379"]
+    ports:
+      - "1884:1883"
+    depends_on:
+      valkey:
+        condition: service_healthy

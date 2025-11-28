@@ -29,3 +29,10 @@ go.work.sum
 
 bin/
 /broker
+
+# TLS certificates and keys
+*.crt
+*.key
+*.pem
+*.csr
+certs/
