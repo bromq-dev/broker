@@ -1,0 +1,148 @@
+package broker
+
+import (
+	"context"
+	"crypto/tls"
+	"net"
+	"sync"
+)
+
+// Listener accepts connections and hands them to the broker.
+type Listener struct {
+	broker   *Broker
+	listener net.Listener
+	addr     string
+	wg       sync.WaitGroup
+	closed   chan struct{}
+}
+
+// ListenTCP creates a TCP listener on the given address.
+func (b *Broker) ListenTCP(addr string) (*Listener, error) {
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	listener := &Listener{
+		broker:   b,
+		listener: l,
+		addr:     addr,
+		closed:   make(chan struct{}),
+	}
+
+	listener.wg.Add(1)
+	go listener.acceptLoop()
+
+	return listener, nil
+}
+
+// ListenTLS creates a TLS listener on the given address.
+func (b *Broker) ListenTLS(addr string, config *tls.Config) (*Listener, error) {
+	l, err := tls.Listen("tcp", addr, config)
+	if err != nil {
+		return nil, err
+	}
+
+	listener := &Listener{
+		broker:   b,
+		listener: l,
+		addr:     addr,
+		closed:   make(chan struct{}),
+	}
+
+	listener.wg.Add(1)
+	go listener.acceptLoop()
+
+	return listener, nil
+}
+
+// Addr returns the listener address.
+func (l *Listener) Addr() net.Addr {
+	return l.listener.Addr()
+}
+
+// Close closes the listener.
+func (l *Listener) Close() error {
+	close(l.closed)
+	err := l.listener.Close()
+	l.wg.Wait()
+	return err
+}
+
+func (l *Listener) acceptLoop() {
+	defer l.wg.Done()
+
+	for {
+		conn, err := l.listener.Accept()
+		if err != nil {
+			select {
+			case <-l.closed:
+				return
+			default:
+				continue
+			}
+		}
+
+		l.broker.HandleConnection(conn)
+	}
+}
+
+// Server combines the broker with listeners for easy setup.
+type Server struct {
+	Broker    *Broker
+	listeners []*Listener
+	mu        sync.Mutex
+}
+
+// NewServer creates a new server with the given configuration.
+func NewServer(config *Config) *Server {
+	return &Server{
+		Broker: New(config),
+	}
+}
+
+// ListenTCP adds a TCP listener.
+func (s *Server) ListenTCP(addr string) error {
+	l, err := s.Broker.ListenTCP(addr)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.listeners = append(s.listeners, l)
+	s.mu.Unlock()
+
+	return nil
+}
+
+// ListenTLS adds a TLS listener.
+func (s *Server) ListenTLS(addr string, config *tls.Config) error {
+	l, err := s.Broker.ListenTLS(addr, config)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.listeners = append(s.listeners, l)
+	s.mu.Unlock()
+
+	return nil
+}
+
+// RegisterHook registers a hook with the broker.
+func (s *Server) RegisterHook(hook Hook) {
+	s.Broker.RegisterHook(hook)
+}
+
+// Shutdown gracefully shuts down the server.
+func (s *Server) Shutdown(ctx context.Context) error {
+	// Close all listeners first
+	s.mu.Lock()
+	for _, l := range s.listeners {
+		l.Close()
+	}
+	s.mu.Unlock()
+
+	// Then shutdown broker
+	return s.Broker.Shutdown(ctx)
+}
