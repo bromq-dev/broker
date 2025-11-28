@@ -16,14 +16,14 @@ func main() {
 	b := broker.New(nil)
 
 	// Add authentication hook with static credentials
-	b.RegisterHook(hooks.NewAuthHook(hooks.AuthConfig{
+	_ = b.AddHook(new(hooks.AuthHook), &hooks.AuthConfig{
 		Credentials: map[string]string{
 			"admin":  "secret",
 			"user1":  "password1",
 			"user2":  "password2",
 			"device": "devicepass",
 		},
-	}))
+	})
 
 	// Start TCP listener
 	ln, err := b.ListenTCP(":1883")

@@ -10,6 +10,7 @@ import (
 
 // AuthHook provides simple username/password authentication.
 type AuthHook struct {
+	broker.HookBase
 	credentials map[string]string // username -> password
 	validator   AuthValidator
 }
@@ -27,15 +28,27 @@ type AuthConfig struct {
 	Validator AuthValidator
 }
 
-// NewAuthHook creates a new authentication hook.
-func NewAuthHook(cfg AuthConfig) *AuthHook {
-	return &AuthHook{
-		credentials: cfg.Credentials,
-		validator:   cfg.Validator,
-	}
+func (h *AuthHook) ID() string { return "auth" }
+
+// Provides indicates which events this hook handles.
+func (h *AuthHook) Provides(event byte) bool {
+	return event == broker.OnConnectEvent
 }
 
-func (h *AuthHook) ID() string { return "auth" }
+// Init is called when the hook is registered with the broker.
+func (h *AuthHook) Init(opts *broker.HookOptions, config any) error {
+	if err := h.HookBase.Init(opts, config); err != nil {
+		return err
+	}
+
+	// Apply config if provided
+	if cfg, ok := config.(*AuthConfig); ok && cfg != nil {
+		h.credentials = cfg.Credentials
+		h.validator = cfg.Validator
+	}
+
+	return nil
+}
 
 // OnConnect validates client credentials.
 func (h *AuthHook) OnConnect(ctx context.Context, client broker.ClientInfo, pkt *packet.Connect) error {

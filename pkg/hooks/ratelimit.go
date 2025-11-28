@@ -11,18 +11,20 @@ import (
 
 // RateLimitHook limits message rates per client.
 type RateLimitHook struct {
-	publishRate  int           // max publishes per interval
-	interval     time.Duration // rate limit interval
-	burstSize    int           // max burst before limiting
+	broker.HookBase
+	publishRate int           // max publishes per interval
+	interval    time.Duration // rate limit interval
+	burstSize   int           // max burst before limiting
 
 	mu      sync.RWMutex
 	buckets map[string]*bucket
+	cancel  context.CancelFunc
 }
 
 type bucket struct {
-	tokens    int
-	lastFill  time.Time
-	mu        sync.Mutex
+	tokens   int
+	lastFill time.Time
+	mu       sync.Mutex
 }
 
 // RateLimitConfig configures the rate limiter.
@@ -37,34 +39,56 @@ type RateLimitConfig struct {
 	BurstSize int
 }
 
-// NewRateLimitHook creates a new rate limiting hook.
-func NewRateLimitHook(cfg RateLimitConfig) *RateLimitHook {
-	if cfg.Interval == 0 {
-		cfg.Interval = time.Second
-	}
-	if cfg.BurstSize == 0 {
-		cfg.BurstSize = cfg.PublishRate * 2
-	}
+func (h *RateLimitHook) ID() string { return "ratelimit" }
 
-	h := &RateLimitHook{
-		publishRate: cfg.PublishRate,
-		interval:    cfg.Interval,
-		burstSize:   cfg.BurstSize,
-		buckets:     make(map[string]*bucket),
-	}
-
-	// Start cleanup goroutine
-	go h.cleanup()
-
-	return h
+// Provides indicates which events this hook handles.
+func (h *RateLimitHook) Provides(event byte) bool {
+	return event == broker.OnPublishReceivedEvent ||
+		event == broker.OnDisconnectEvent
 }
 
-func (h *RateLimitHook) ID() string { return "ratelimit" }
+// Init is called when the hook is registered with the broker.
+func (h *RateLimitHook) Init(opts *broker.HookOptions, config any) error {
+	if err := h.HookBase.Init(opts, config); err != nil {
+		return err
+	}
+
+	// Apply config if provided
+	if cfg, ok := config.(*RateLimitConfig); ok && cfg != nil {
+		h.publishRate = cfg.PublishRate
+		h.interval = cfg.Interval
+		h.burstSize = cfg.BurstSize
+	}
+
+	// Apply defaults
+	if h.interval == 0 {
+		h.interval = time.Second
+	}
+	if h.burstSize == 0 && h.publishRate > 0 {
+		h.burstSize = h.publishRate * 2
+	}
+	if h.buckets == nil {
+		h.buckets = make(map[string]*bucket)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	h.cancel = cancel
+	go h.cleanup(ctx)
+	return nil
+}
+
+// Stop is called when the broker shuts down.
+func (h *RateLimitHook) Stop() error {
+	if h.cancel != nil {
+		h.cancel()
+	}
+	return nil
+}
 
 // OnPublishReceived checks the publish rate limit.
 func (h *RateLimitHook) OnPublishReceived(ctx context.Context, client broker.ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
 	if h.publishRate <= 0 {
-		return nil, nil // No limit
+		return pkt, nil // No limit
 	}
 
 	b := h.getBucket(client.ClientID())
@@ -72,17 +96,10 @@ func (h *RateLimitHook) OnPublishReceived(ctx context.Context, client broker.Cli
 		return nil, broker.NewReasonCodeError(packet.ReasonQuotaExceeded, "publish rate limit exceeded")
 	}
 
-	return nil, nil
+	return pkt, nil
 }
 
-func (h *RateLimitHook) OnPublishDeliver(ctx context.Context, subscriber broker.ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
-	return nil, nil
-}
-
-// ConnectionHook implementation (cleanup on disconnect)
-
-func (h *RateLimitHook) OnConnected(ctx context.Context, client broker.ClientInfo) {}
-
+// OnDisconnect cleans up the client's bucket.
 func (h *RateLimitHook) OnDisconnect(ctx context.Context, client broker.ClientInfo, err error) {
 	h.mu.Lock()
 	delete(h.buckets, client.ClientID())
@@ -134,24 +151,29 @@ func (b *bucket) take() bool {
 	return true
 }
 
-func (h *RateLimitHook) cleanup() {
+func (h *RateLimitHook) cleanup(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		h.mu.Lock()
-		now := time.Now()
-		for id, b := range h.buckets {
-			b.mu.Lock()
-			// Remove stale buckets (no activity for 5 minutes)
-			if now.Sub(b.lastFill) > 5*time.Minute {
-				delete(h.buckets, id)
-			} else {
-				// Refill tokens
-				b.tokens = h.burstSize
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.mu.Lock()
+			now := time.Now()
+			for id, b := range h.buckets {
+				b.mu.Lock()
+				// Remove stale buckets (no activity for 5 minutes)
+				if now.Sub(b.lastFill) > 5*time.Minute {
+					delete(h.buckets, id)
+				} else {
+					// Refill tokens
+					b.tokens = h.burstSize
+				}
+				b.mu.Unlock()
 			}
-			b.mu.Unlock()
+			h.mu.Unlock()
 		}
-		h.mu.Unlock()
 	}
 }

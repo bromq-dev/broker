@@ -100,9 +100,19 @@ func New(config *Config) *Broker {
 	}
 }
 
-// RegisterHook registers a hook for extending broker behavior.
-func (b *Broker) RegisterHook(hook Hook) {
+// AddHook registers a hook for extending broker behavior.
+// The hook's Init method is called immediately with HookOptions.
+// The config parameter is hook-specific configuration (can be nil).
+func (b *Broker) AddHook(hook Hook, config any) error {
+	opts := &HookOptions{
+		Broker: b,
+		Log:    defaultLog(),
+	}
+	if err := hook.Init(opts, config); err != nil {
+		return err
+	}
 	b.hooks.Register(hook)
+	return nil
 }
 
 // HandleConnection handles a new client connection.
@@ -154,6 +164,9 @@ func (b *Broker) handleConnection(conn net.Conn) {
 // Shutdown gracefully shuts down the broker.
 func (b *Broker) Shutdown(ctx context.Context) error {
 	b.cancel()
+
+	// Stop all hooks
+	b.hooks.StopAll()
 
 	// Disconnect all clients
 	b.clientsMu.Lock()

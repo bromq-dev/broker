@@ -2,7 +2,7 @@ package broker
 
 import (
 	"context"
-	"errors"
+	"log/slog"
 	"sync"
 
 	"github.com/bromq-dev/broker/pkg/packet"
@@ -10,16 +10,23 @@ import (
 
 // Hooks manages registered hooks and dispatches events.
 type Hooks struct {
-	mu sync.RWMutex
+	mu  sync.RWMutex
+	all []Hook
 
-	auth        []AuthHook
-	authz       []AuthzHook
-	session     []SessionHook
-	message     []MessageHook
-	connection  []ConnectionHook
-	will        []WillHook
-	retain      RetainHook      // Single retain hook (storage backend)
-	persistence PersistenceHook // Single persistence hook (storage backend)
+	// Cached lists of hooks that provide specific events
+	onConnect         []Hook
+	onConnected       []Hook
+	onDisconnect      []Hook
+	onSubscribe       []Hook
+	onPublish         []Hook
+	onPublishReceived []Hook
+	onPublishDeliver  []Hook
+	onSessionCreated  []Hook
+	onSessionResumed  []Hook
+	onSessionEnded    []Hook
+	onWillPublish     []Hook
+	storeRetained     []Hook
+	getRetained       []Hook
 }
 
 // NewHooks creates a new hook manager.
@@ -27,42 +34,72 @@ func NewHooks() *Hooks {
 	return &Hooks{}
 }
 
-// Register registers a hook. The hook is checked for all supported interfaces.
+// Register registers a hook. The hook is categorized by which events it provides.
+// Init is NOT called here - it's called by the broker after registration.
 func (h *Hooks) Register(hook Hook) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if ah, ok := hook.(AuthHook); ok {
-		h.auth = append(h.auth, ah)
+	h.all = append(h.all, hook)
+
+	// Cache hooks by event type they provide
+	if hook.Provides(OnConnectEvent) {
+		h.onConnect = append(h.onConnect, hook)
 	}
-	if az, ok := hook.(AuthzHook); ok {
-		h.authz = append(h.authz, az)
+	if hook.Provides(OnConnectedEvent) {
+		h.onConnected = append(h.onConnected, hook)
 	}
-	if sh, ok := hook.(SessionHook); ok {
-		h.session = append(h.session, sh)
+	if hook.Provides(OnDisconnectEvent) {
+		h.onDisconnect = append(h.onDisconnect, hook)
 	}
-	if mh, ok := hook.(MessageHook); ok {
-		h.message = append(h.message, mh)
+	if hook.Provides(OnSubscribeEvent) {
+		h.onSubscribe = append(h.onSubscribe, hook)
 	}
-	if ch, ok := hook.(ConnectionHook); ok {
-		h.connection = append(h.connection, ch)
+	if hook.Provides(OnPublishEvent) {
+		h.onPublish = append(h.onPublish, hook)
 	}
-	if wh, ok := hook.(WillHook); ok {
-		h.will = append(h.will, wh)
+	if hook.Provides(OnPublishReceivedEvent) {
+		h.onPublishReceived = append(h.onPublishReceived, hook)
 	}
-	if rh, ok := hook.(RetainHook); ok {
-		h.retain = rh
+	if hook.Provides(OnPublishDeliverEvent) {
+		h.onPublishDeliver = append(h.onPublishDeliver, hook)
 	}
-	if ph, ok := hook.(PersistenceHook); ok {
-		h.persistence = ph
+	if hook.Provides(OnSessionCreatedEvent) {
+		h.onSessionCreated = append(h.onSessionCreated, hook)
+	}
+	if hook.Provides(OnSessionResumedEvent) {
+		h.onSessionResumed = append(h.onSessionResumed, hook)
+	}
+	if hook.Provides(OnSessionEndedEvent) {
+		h.onSessionEnded = append(h.onSessionEnded, hook)
+	}
+	if hook.Provides(OnWillPublishEvent) {
+		h.onWillPublish = append(h.onWillPublish, hook)
+	}
+	if hook.Provides(StoreRetainedEvent) {
+		h.storeRetained = append(h.storeRetained, hook)
+	}
+	if hook.Provides(GetRetainedEvent) {
+		h.getRetained = append(h.getRetained, hook)
 	}
 }
 
-// OnConnect calls all auth hooks for connection authentication.
+// StopAll calls Stop on all registered hooks.
+func (h *Hooks) StopAll() {
+	h.mu.RLock()
+	hooks := h.all
+	h.mu.RUnlock()
+
+	for _, hook := range hooks {
+		hook.Stop()
+	}
+}
+
+// OnConnect calls all hooks that provide OnConnectEvent.
 // Returns error if any hook rejects the connection.
 func (h *Hooks) OnConnect(ctx context.Context, client ClientInfo, pkt *packet.Connect) error {
 	h.mu.RLock()
-	hooks := h.auth
+	hooks := h.onConnect
 	h.mu.RUnlock()
 
 	for _, hook := range hooks {
@@ -73,11 +110,33 @@ func (h *Hooks) OnConnect(ctx context.Context, client ClientInfo, pkt *packet.Co
 	return nil
 }
 
-// OnSubscribe calls all authz hooks for subscription authorization.
+// OnConnected notifies all hooks that provide OnConnectedEvent.
+func (h *Hooks) OnConnected(ctx context.Context, client ClientInfo) {
+	h.mu.RLock()
+	hooks := h.onConnected
+	h.mu.RUnlock()
+
+	for _, hook := range hooks {
+		hook.OnConnected(ctx, client)
+	}
+}
+
+// OnDisconnect notifies all hooks that provide OnDisconnectEvent.
+func (h *Hooks) OnDisconnect(ctx context.Context, client ClientInfo, err error) {
+	h.mu.RLock()
+	hooks := h.onDisconnect
+	h.mu.RUnlock()
+
+	for _, hook := range hooks {
+		hook.OnDisconnect(ctx, client, err)
+	}
+}
+
+// OnSubscribe calls all hooks that provide OnSubscribeEvent.
 // Returns the final (possibly modified) subscriptions.
 func (h *Hooks) OnSubscribe(ctx context.Context, client ClientInfo, subs []packet.Subscription) ([]packet.Subscription, error) {
 	h.mu.RLock()
-	hooks := h.authz
+	hooks := h.onSubscribe
 	h.mu.RUnlock()
 
 	result := subs
@@ -93,10 +152,10 @@ func (h *Hooks) OnSubscribe(ctx context.Context, client ClientInfo, subs []packe
 	return result, nil
 }
 
-// OnPublish calls all authz hooks for publish authorization.
+// OnPublish calls all hooks that provide OnPublishEvent for publish authorization.
 func (h *Hooks) OnPublish(ctx context.Context, client ClientInfo, pkt *packet.Publish) error {
 	h.mu.RLock()
-	hooks := h.authz
+	hooks := h.onPublish
 	h.mu.RUnlock()
 
 	for _, hook := range hooks {
@@ -110,7 +169,7 @@ func (h *Hooks) OnPublish(ctx context.Context, client ClientInfo, pkt *packet.Pu
 // CanRead checks if a client can receive messages on a topic.
 func (h *Hooks) CanRead(ctx context.Context, client ClientInfo, topic string) bool {
 	h.mu.RLock()
-	hooks := h.authz
+	hooks := h.onSubscribe // Use subscribe hooks for read authorization
 	h.mu.RUnlock()
 
 	for _, hook := range hooks {
@@ -121,43 +180,10 @@ func (h *Hooks) CanRead(ctx context.Context, client ClientInfo, topic string) bo
 	return true
 }
 
-// OnSessionCreated notifies all session hooks of new session creation.
-func (h *Hooks) OnSessionCreated(ctx context.Context, client ClientInfo) {
-	h.mu.RLock()
-	hooks := h.session
-	h.mu.RUnlock()
-
-	for _, hook := range hooks {
-		hook.OnSessionCreated(ctx, client)
-	}
-}
-
-// OnSessionResumed notifies all session hooks of session resumption.
-func (h *Hooks) OnSessionResumed(ctx context.Context, client ClientInfo) {
-	h.mu.RLock()
-	hooks := h.session
-	h.mu.RUnlock()
-
-	for _, hook := range hooks {
-		hook.OnSessionResumed(ctx, client)
-	}
-}
-
-// OnSessionEnded notifies all session hooks of session termination.
-func (h *Hooks) OnSessionEnded(ctx context.Context, clientID string) {
-	h.mu.RLock()
-	hooks := h.session
-	h.mu.RUnlock()
-
-	for _, hook := range hooks {
-		hook.OnSessionEnded(ctx, clientID)
-	}
-}
-
-// OnPublishReceived calls all message hooks when a PUBLISH is received.
+// OnPublishReceived calls all hooks that provide OnPublishReceivedEvent.
 func (h *Hooks) OnPublishReceived(ctx context.Context, client ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
 	h.mu.RLock()
-	hooks := h.message
+	hooks := h.onPublishReceived
 	h.mu.RUnlock()
 
 	result := pkt
@@ -173,10 +199,10 @@ func (h *Hooks) OnPublishReceived(ctx context.Context, client ClientInfo, pkt *p
 	return result, nil
 }
 
-// OnPublishDeliver calls all message hooks before delivering a message.
+// OnPublishDeliver calls all hooks that provide OnPublishDeliverEvent.
 func (h *Hooks) OnPublishDeliver(ctx context.Context, subscriber ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
 	h.mu.RLock()
-	hooks := h.message
+	hooks := h.onPublishDeliver
 	h.mu.RUnlock()
 
 	result := pkt
@@ -192,32 +218,43 @@ func (h *Hooks) OnPublishDeliver(ctx context.Context, subscriber ClientInfo, pkt
 	return result, nil
 }
 
-// OnConnected notifies all connection hooks of successful connection.
-func (h *Hooks) OnConnected(ctx context.Context, client ClientInfo) {
+// OnSessionCreated notifies all hooks that provide OnSessionCreatedEvent.
+func (h *Hooks) OnSessionCreated(ctx context.Context, client ClientInfo) {
 	h.mu.RLock()
-	hooks := h.connection
+	hooks := h.onSessionCreated
 	h.mu.RUnlock()
 
 	for _, hook := range hooks {
-		hook.OnConnected(ctx, client)
+		hook.OnSessionCreated(ctx, client)
 	}
 }
 
-// OnDisconnect notifies all connection hooks of disconnection.
-func (h *Hooks) OnDisconnect(ctx context.Context, client ClientInfo, err error) {
+// OnSessionResumed notifies all hooks that provide OnSessionResumedEvent.
+func (h *Hooks) OnSessionResumed(ctx context.Context, client ClientInfo) {
 	h.mu.RLock()
-	hooks := h.connection
+	hooks := h.onSessionResumed
 	h.mu.RUnlock()
 
 	for _, hook := range hooks {
-		hook.OnDisconnect(ctx, client, err)
+		hook.OnSessionResumed(ctx, client)
 	}
 }
 
-// OnWillPublish calls all will hooks before publishing a will message.
+// OnSessionEnded notifies all hooks that provide OnSessionEndedEvent.
+func (h *Hooks) OnSessionEnded(ctx context.Context, clientID string) {
+	h.mu.RLock()
+	hooks := h.onSessionEnded
+	h.mu.RUnlock()
+
+	for _, hook := range hooks {
+		hook.OnSessionEnded(ctx, clientID)
+	}
+}
+
+// OnWillPublish calls all hooks that provide OnWillPublishEvent.
 func (h *Hooks) OnWillPublish(ctx context.Context, clientID string, will *packet.Publish) (*packet.Publish, error) {
 	h.mu.RLock()
-	hooks := h.will
+	hooks := h.onWillPublish
 	h.mu.RUnlock()
 
 	result := will
@@ -233,65 +270,34 @@ func (h *Hooks) OnWillPublish(ctx context.Context, clientID string, will *packet
 	return result, nil
 }
 
-// ErrNoRetainHook indicates no retain hook is registered.
-var ErrNoRetainHook = errors.New("no retain hook registered")
-
-// StoreRetained stores a retained message (delegates to retain hook).
+// StoreRetained stores a retained message (delegates to first hook that provides it).
 func (h *Hooks) StoreRetained(ctx context.Context, topic string, pkt *packet.Publish) error {
 	h.mu.RLock()
-	rh := h.retain
+	hooks := h.storeRetained
 	h.mu.RUnlock()
 
-	if rh != nil {
-		return rh.StoreRetained(ctx, topic, pkt)
+	for _, hook := range hooks {
+		if err := hook.StoreRetained(ctx, topic, pkt); err != nil {
+			return err
+		}
+		return nil // Only use first provider
 	}
 	return ErrNoRetainHook
 }
 
-// GetRetained retrieves retained messages (delegates to retain hook).
+// GetRetained retrieves retained messages (delegates to first hook that provides it).
 func (h *Hooks) GetRetained(ctx context.Context, filter string) ([]*packet.Publish, error) {
 	h.mu.RLock()
-	rh := h.retain
+	hooks := h.getRetained
 	h.mu.RUnlock()
 
-	if rh != nil {
-		return rh.GetRetained(ctx, filter)
+	for _, hook := range hooks {
+		return hook.GetRetained(ctx, filter)
 	}
 	return nil, nil
 }
 
-// SaveSession saves session state (delegates to persistence hook).
-func (h *Hooks) SaveSession(ctx context.Context, session *SessionState) error {
-	h.mu.RLock()
-	ph := h.persistence
-	h.mu.RUnlock()
-
-	if ph != nil {
-		return ph.SaveSession(ctx, session)
-	}
-	return nil
-}
-
-// LoadSession loads session state (delegates to persistence hook).
-func (h *Hooks) LoadSession(ctx context.Context, clientID string) (*SessionState, error) {
-	h.mu.RLock()
-	ph := h.persistence
-	h.mu.RUnlock()
-
-	if ph != nil {
-		return ph.LoadSession(ctx, clientID)
-	}
-	return nil, nil
-}
-
-// DeleteSession deletes session state (delegates to persistence hook).
-func (h *Hooks) DeleteSession(ctx context.Context, clientID string) error {
-	h.mu.RLock()
-	ph := h.persistence
-	h.mu.RUnlock()
-
-	if ph != nil {
-		return ph.DeleteSession(ctx, clientID)
-	}
-	return nil
+// defaultLog returns a default logger if none provided.
+func defaultLog() *slog.Logger {
+	return slog.Default()
 }

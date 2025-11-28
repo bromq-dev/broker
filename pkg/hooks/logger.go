@@ -10,6 +10,7 @@ import (
 
 // LoggerHook logs broker events using slog.
 type LoggerHook struct {
+	broker.HookBase
 	logger *slog.Logger
 	level  LogLevel
 }
@@ -39,24 +40,47 @@ type LoggerConfig struct {
 	Level LogLevel
 }
 
-// NewLoggerHook creates a new logging hook.
-func NewLoggerHook(cfg LoggerConfig) *LoggerHook {
-	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
-	}
-	if cfg.Level == 0 {
-		cfg.Level = LogLevelAll
-	}
-	return &LoggerHook{
-		logger: cfg.Logger,
-		level:  cfg.Level,
-	}
-}
-
 func (h *LoggerHook) ID() string { return "logger" }
 
-// ConnectionHook implementation
+// Provides indicates which events this hook handles.
+func (h *LoggerHook) Provides(event byte) bool {
+	switch event {
+	case broker.OnConnectedEvent, broker.OnDisconnectEvent:
+		return h.level&LogLevelConnection != 0
+	case broker.OnSubscribeEvent:
+		return h.level&LogLevelSubscribe != 0
+	case broker.OnPublishReceivedEvent, broker.OnPublishDeliverEvent:
+		return h.level&LogLevelPublish != 0
+	case broker.OnSessionCreatedEvent, broker.OnSessionResumedEvent, broker.OnSessionEndedEvent:
+		return h.level&LogLevelSession != 0
+	}
+	return false
+}
 
+// Init is called when the hook is registered with the broker.
+func (h *LoggerHook) Init(opts *broker.HookOptions, config any) error {
+	if err := h.HookBase.Init(opts, config); err != nil {
+		return err
+	}
+
+	// Apply config if provided
+	if cfg, ok := config.(*LoggerConfig); ok && cfg != nil {
+		h.logger = cfg.Logger
+		h.level = cfg.Level
+	}
+
+	// Apply defaults
+	if h.logger == nil {
+		h.logger = slog.Default()
+	}
+	if h.level == 0 {
+		h.level = LogLevelAll
+	}
+
+	return nil
+}
+
+// OnConnected logs client connections.
 func (h *LoggerHook) OnConnected(ctx context.Context, client broker.ClientInfo) {
 	if h.level&LogLevelConnection == 0 {
 		return
@@ -70,6 +94,7 @@ func (h *LoggerHook) OnConnected(ctx context.Context, client broker.ClientInfo) 
 	)
 }
 
+// OnDisconnect logs client disconnections.
 func (h *LoggerHook) OnDisconnect(ctx context.Context, client broker.ClientInfo, err error) {
 	if h.level&LogLevelConnection == 0 {
 		return
@@ -86,11 +111,10 @@ func (h *LoggerHook) OnDisconnect(ctx context.Context, client broker.ClientInfo,
 	}
 }
 
-// AuthzHook implementation (for subscribe logging)
-
+// OnSubscribe logs subscriptions.
 func (h *LoggerHook) OnSubscribe(ctx context.Context, client broker.ClientInfo, subs []packet.Subscription) ([]packet.Subscription, error) {
 	if h.level&LogLevelSubscribe == 0 {
-		return nil, nil
+		return subs, nil
 	}
 	for _, sub := range subs {
 		h.logger.Info("client subscribed",
@@ -99,23 +123,13 @@ func (h *LoggerHook) OnSubscribe(ctx context.Context, client broker.ClientInfo, 
 			"qos", sub.QoS,
 		)
 	}
-	return nil, nil
+	return subs, nil
 }
 
-func (h *LoggerHook) OnPublish(ctx context.Context, client broker.ClientInfo, pkt *packet.Publish) error {
-	// No-op for authz - we log on receive
-	return nil
-}
-
-func (h *LoggerHook) CanRead(ctx context.Context, client broker.ClientInfo, topic string) bool {
-	return true
-}
-
-// MessageHook implementation
-
+// OnPublishReceived logs received messages.
 func (h *LoggerHook) OnPublishReceived(ctx context.Context, client broker.ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
 	if h.level&LogLevelPublish == 0 {
-		return nil, nil
+		return pkt, nil
 	}
 	h.logger.Debug("message received",
 		"client_id", client.ClientID(),
@@ -124,23 +138,23 @@ func (h *LoggerHook) OnPublishReceived(ctx context.Context, client broker.Client
 		"retain", pkt.Retain,
 		"payload_size", len(pkt.Payload),
 	)
-	return nil, nil
+	return pkt, nil
 }
 
+// OnPublishDeliver logs delivered messages.
 func (h *LoggerHook) OnPublishDeliver(ctx context.Context, subscriber broker.ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
 	if h.level&LogLevelPublish == 0 {
-		return nil, nil
+		return pkt, nil
 	}
 	h.logger.Debug("message delivered",
 		"client_id", subscriber.ClientID(),
 		"topic", pkt.TopicName,
 		"qos", pkt.QoS,
 	)
-	return nil, nil
+	return pkt, nil
 }
 
-// SessionHook implementation
-
+// OnSessionCreated logs session creation.
 func (h *LoggerHook) OnSessionCreated(ctx context.Context, client broker.ClientInfo) {
 	if h.level&LogLevelSession == 0 {
 		return
@@ -150,6 +164,7 @@ func (h *LoggerHook) OnSessionCreated(ctx context.Context, client broker.ClientI
 	)
 }
 
+// OnSessionResumed logs session resumption.
 func (h *LoggerHook) OnSessionResumed(ctx context.Context, client broker.ClientInfo) {
 	if h.level&LogLevelSession == 0 {
 		return
@@ -159,6 +174,7 @@ func (h *LoggerHook) OnSessionResumed(ctx context.Context, client broker.ClientI
 	)
 }
 
+// OnSessionEnded logs session termination.
 func (h *LoggerHook) OnSessionEnded(ctx context.Context, clientID string) {
 	if h.level&LogLevelSession == 0 {
 		return

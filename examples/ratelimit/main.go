@@ -17,16 +17,16 @@ func main() {
 	b := broker.New(nil)
 
 	// Add rate limiting - 10 messages per second, burst of 20
-	b.RegisterHook(hooks.NewRateLimitHook(hooks.RateLimitConfig{
+	_ = b.AddHook(new(hooks.RateLimitHook), &hooks.RateLimitConfig{
 		PublishRate: 10,
 		Interval:    time.Second,
 		BurstSize:   20,
-	}))
+	})
 
 	// Add logging to see rate limit rejections
-	b.RegisterHook(hooks.NewLoggerHook(hooks.LoggerConfig{
+	_ = b.AddHook(new(hooks.LoggerHook), &hooks.LoggerConfig{
 		Level: hooks.LogLevelConnection | hooks.LogLevelPublish,
-	}))
+	})
 
 	// Start TCP listener
 	ln, err := b.ListenTCP(":1883")

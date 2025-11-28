@@ -29,16 +29,16 @@ func main() {
 	})
 
 	// 1. Authentication - username/password
-	b.RegisterHook(hooks.NewAuthHook(hooks.AuthConfig{
+	_ = b.AddHook(new(hooks.AuthHook), &hooks.AuthConfig{
 		Credentials: map[string]string{
 			"admin":   "supersecret",
 			"device":  "devicekey",
 			"monitor": "viewonly",
 		},
-	}))
+	})
 
 	// 2. Authorization - ACL rules
-	b.RegisterHook(hooks.NewACLHook(hooks.ACLConfig{
+	_ = b.AddHook(new(hooks.ACLHook), &hooks.ACLConfig{
 		Rules: []hooks.ACLRule{
 			// Admin has full access
 			{Username: "admin", TopicFilter: "#", Read: true, Write: true},
@@ -54,32 +54,25 @@ func main() {
 			{TopicFilter: "public/#", Read: true, Write: true},
 		},
 		DenyByDefault: true,
-	}))
+	})
 
 	// 3. Rate limiting - prevent abuse
-	b.RegisterHook(hooks.NewRateLimitHook(hooks.RateLimitConfig{
+	_ = b.AddHook(new(hooks.RateLimitHook), &hooks.RateLimitConfig{
 		PublishRate: 100, // 100 msg/sec per client
 		BurstSize:   200,
-	}))
+	})
 
 	// 4. Logging - track activity
-	b.RegisterHook(hooks.NewLoggerHook(hooks.LoggerConfig{
+	_ = b.AddHook(new(hooks.LoggerHook), &hooks.LoggerConfig{
 		Logger: logger,
 		Level:  hooks.LogLevelConnection | hooks.LogLevelSession,
-	}))
+	})
 
-	// 5. $SYS metrics
-	sysHook := hooks.NewSysHook(hooks.SysConfig{
-		Publisher: func(topic string, payload []byte, retain bool) {
-			// Log metrics (in production, inject into broker)
-			slog.Debug("metric", "topic", topic, "value", string(payload))
-		},
+	// 5. $SYS metrics - auto-starts on registration
+	_ = b.AddHook(new(hooks.SysHook), &hooks.SysConfig{
 		Version:  "1.0.0",
 		Interval: 30 * time.Second,
 	})
-	b.RegisterHook(sysHook)
-	sysHook.Start()
-	defer sysHook.Stop()
 
 	// Start TCP listener
 	ln, err := b.ListenTCP(":1883")
@@ -111,15 +104,4 @@ func main() {
 	if err := b.Shutdown(ctx); err != nil {
 		slog.Error("Shutdown error", "error", err)
 	}
-
-	// Final stats
-	stats := b.Stats()
-	metrics := sysHook.Metrics()
-	slog.Info("Final stats",
-		"uptime", metrics.Uptime.Round(time.Second),
-		"total_clients", metrics.ClientsTotal,
-		"messages_in", metrics.MessagesReceived,
-		"messages_out", metrics.MessagesSent,
-		"retained", stats.Retained,
-	)
 }

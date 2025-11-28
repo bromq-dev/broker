@@ -4,7 +4,6 @@ package hooks
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,9 +23,9 @@ import (
 //   - $SYS/broker/bytes/sent
 //   - $SYS/broker/subscriptions/count
 type SysHook struct {
-	publisher SysPublisher
-	interval  time.Duration
-	version   string
+	broker.HookBase
+	interval time.Duration
+	version  string
 
 	// Metrics
 	startTime    time.Time
@@ -38,51 +37,49 @@ type SysHook struct {
 	bytesSent    atomic.Int64
 	subsCount    atomic.Int64
 
-	mu     sync.Mutex
 	cancel context.CancelFunc
 }
 
-// SysPublisher is called to publish $SYS messages.
-type SysPublisher func(topic string, payload []byte, retain bool)
-
 // SysConfig configures the $SYS hook.
 type SysConfig struct {
-	// Publisher is called to publish $SYS messages.
-	Publisher SysPublisher
-
 	// Interval is how often to publish metrics (default: 10s).
 	Interval time.Duration
 
-	// Version is the broker version string.
+	// Version is the broker version string (default: "1.0.0").
 	Version string
-}
-
-// NewSysHook creates a new $SYS metrics hook.
-func NewSysHook(cfg SysConfig) *SysHook {
-	if cfg.Interval == 0 {
-		cfg.Interval = 10 * time.Second
-	}
-	if cfg.Version == "" {
-		cfg.Version = "1.0.0"
-	}
-
-	return &SysHook{
-		publisher: cfg.Publisher,
-		interval:  cfg.Interval,
-		version:   cfg.Version,
-		startTime: time.Now(),
-	}
 }
 
 func (h *SysHook) ID() string { return "sys" }
 
-// Start begins publishing $SYS metrics.
-func (h *SysHook) Start() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// Provides indicates which events this hook handles.
+func (h *SysHook) Provides(event byte) bool {
+	return event == broker.OnConnectedEvent ||
+		event == broker.OnDisconnectEvent ||
+		event == broker.OnPublishReceivedEvent ||
+		event == broker.OnPublishDeliverEvent
+}
 
-	if h.cancel != nil {
-		return
+// Init is called when the hook is registered with the broker.
+func (h *SysHook) Init(opts *broker.HookOptions, config any) error {
+	if err := h.HookBase.Init(opts, config); err != nil {
+		return err
+	}
+
+	// Apply config if provided
+	if cfg, ok := config.(*SysConfig); ok && cfg != nil {
+		h.interval = cfg.Interval
+		h.version = cfg.Version
+	}
+
+	// Apply defaults for zero values
+	if h.interval == 0 {
+		h.interval = 10 * time.Second
+	}
+	if h.version == "" {
+		h.version = "1.0.0"
+	}
+	if h.startTime.IsZero() {
+		h.startTime = time.Now()
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -92,17 +89,16 @@ func (h *SysHook) Start() {
 	h.publish("$SYS/broker/version", h.version)
 
 	go h.loop(ctx)
+	return nil
 }
 
-// Stop stops publishing $SYS metrics.
-func (h *SysHook) Stop() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
+// Stop is called when the broker shuts down.
+func (h *SysHook) Stop() error {
 	if h.cancel != nil {
 		h.cancel()
 		h.cancel = nil
 	}
+	return nil
 }
 
 func (h *SysHook) loop(ctx context.Context) {
@@ -133,34 +129,34 @@ func (h *SysHook) publishMetrics() {
 }
 
 func (h *SysHook) publish(topic, value string) {
-	if h.publisher != nil {
-		h.publisher(topic, []byte(value), true)
+	if h.Opts != nil && h.Opts.Broker != nil {
+		h.Opts.Broker.Publish(topic, []byte(value), true)
 	}
 }
 
-// ConnectionHook implementation
-
+// OnConnected tracks connected clients.
 func (h *SysHook) OnConnected(ctx context.Context, client broker.ClientInfo) {
 	h.connected.Add(1)
 	h.totalClients.Add(1)
 }
 
+// OnDisconnect tracks disconnected clients.
 func (h *SysHook) OnDisconnect(ctx context.Context, client broker.ClientInfo, err error) {
 	h.connected.Add(-1)
 }
 
-// MessageHook implementation
-
+// OnPublishReceived tracks received messages.
 func (h *SysHook) OnPublishReceived(ctx context.Context, client broker.ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
 	h.msgsReceived.Add(1)
 	h.bytesRecv.Add(int64(len(pkt.Payload)))
-	return nil, nil
+	return pkt, nil
 }
 
+// OnPublishDeliver tracks sent messages.
 func (h *SysHook) OnPublishDeliver(ctx context.Context, subscriber broker.ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
 	h.msgsSent.Add(1)
 	h.bytesSent.Add(int64(len(pkt.Payload)))
-	return nil, nil
+	return pkt, nil
 }
 
 // Metrics provides direct access to current metrics.

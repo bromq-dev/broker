@@ -3,132 +3,129 @@ package broker
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 
 	"github.com/bromq-dev/broker/pkg/packet"
 )
 
 // Hook provides extension points for customizing broker behavior.
 // Implementations can intercept and modify packet handling at various stages.
-// All methods are optional - return nil/zero values to use default behavior.
 //
-// Hook methods are called synchronously. For long-running operations,
-// implementations should spawn goroutines internally.
+// Embed HookBase in your hook struct to get default implementations of all methods,
+// then override only the methods you need.
 type Hook interface {
 	// ID returns a unique identifier for this hook.
 	ID() string
-}
 
-// AuthHook handles client authentication.
-type AuthHook interface {
-	Hook
+	// Init is called when the hook is added to the broker.
+	// The config parameter is hook-specific configuration (can be nil).
+	Init(opts *HookOptions, config any) error
 
-	// OnConnect is called when a client sends a CONNECT packet.
-	// Return nil to accept the connection, or an error to reject.
-	// For MQTT 5.0, return a ReasonCode error to send specific reason code.
+	// Stop is called when the broker is shutting down.
+	Stop() error
+
+	// Provides returns true if the hook handles the given event type.
+	Provides(event byte) bool
+
+	// Connection lifecycle
 	OnConnect(ctx context.Context, client ClientInfo, pkt *packet.Connect) error
-}
-
-// AuthzHook handles client authorization for operations.
-type AuthzHook interface {
-	Hook
-
-	// OnSubscribe is called before processing a SUBSCRIBE packet.
-	// Return modified subscriptions or nil to use original.
-	// Return error to reject the entire subscription.
-	OnSubscribe(ctx context.Context, client ClientInfo, subs []packet.Subscription) ([]packet.Subscription, error)
-
-	// OnPublish is called before processing a PUBLISH packet.
-	// Return nil to allow, error to reject.
-	OnPublish(ctx context.Context, client ClientInfo, pkt *packet.Publish) error
-
-	// CanRead checks if a client can receive messages on a topic.
-	// Called during message delivery. Return false to skip delivery.
-	CanRead(ctx context.Context, client ClientInfo, topic string) bool
-}
-
-// SessionHook handles session lifecycle events.
-type SessionHook interface {
-	Hook
-
-	// OnSessionCreated is called when a new session is created.
-	OnSessionCreated(ctx context.Context, client ClientInfo)
-
-	// OnSessionResumed is called when an existing session is resumed.
-	OnSessionResumed(ctx context.Context, client ClientInfo)
-
-	// OnSessionEnded is called when a session ends (expires or cleaned).
-	OnSessionEnded(ctx context.Context, clientID string)
-}
-
-// MessageHook handles message interception and transformation.
-type MessageHook interface {
-	Hook
-
-	// OnPublishReceived is called when a PUBLISH is received from a client.
-	// Return modified packet or nil to use original.
-	// Return error to reject the publish.
-	OnPublishReceived(ctx context.Context, client ClientInfo, pkt *packet.Publish) (*packet.Publish, error)
-
-	// OnPublishDeliver is called before delivering a message to a subscriber.
-	// Return modified packet or nil to use original.
-	// Return error to skip delivery to this subscriber.
-	OnPublishDeliver(ctx context.Context, subscriber ClientInfo, pkt *packet.Publish) (*packet.Publish, error)
-}
-
-// ConnectionHook handles connection lifecycle events.
-type ConnectionHook interface {
-	Hook
-
-	// OnConnected is called after a client successfully connects.
 	OnConnected(ctx context.Context, client ClientInfo)
-
-	// OnDisconnect is called when a client disconnects.
 	OnDisconnect(ctx context.Context, client ClientInfo, err error)
-}
 
-// WillHook handles will message processing.
-type WillHook interface {
-	Hook
+	// Authorization
+	OnSubscribe(ctx context.Context, client ClientInfo, subs []packet.Subscription) ([]packet.Subscription, error)
+	OnPublish(ctx context.Context, client ClientInfo, pkt *packet.Publish) error
+	CanRead(ctx context.Context, client ClientInfo, topic string) bool
 
-	// OnWillPublish is called before publishing a will message.
-	// Return modified will or nil to use original.
-	// Return error to prevent will publication.
+	// Message handling
+	OnPublishReceived(ctx context.Context, client ClientInfo, pkt *packet.Publish) (*packet.Publish, error)
+	OnPublishDeliver(ctx context.Context, subscriber ClientInfo, pkt *packet.Publish) (*packet.Publish, error)
+
+	// Session lifecycle
+	OnSessionCreated(ctx context.Context, client ClientInfo)
+	OnSessionResumed(ctx context.Context, client ClientInfo)
+	OnSessionEnded(ctx context.Context, clientID string)
+
+	// Will message
 	OnWillPublish(ctx context.Context, clientID string, will *packet.Publish) (*packet.Publish, error)
-}
 
-// RetainHook handles retained message storage.
-type RetainHook interface {
-	Hook
-
-	// StoreRetained stores a retained message for a topic.
-	// Pass nil payload to delete the retained message.
+	// Retained messages
 	StoreRetained(ctx context.Context, topic string, pkt *packet.Publish) error
-
-	// GetRetained retrieves retained messages matching a filter.
 	GetRetained(ctx context.Context, filter string) ([]*packet.Publish, error)
 }
 
-// PersistenceHook handles session and message persistence.
-type PersistenceHook interface {
-	Hook
+// ErrNoRetainHook indicates no retain hook is registered.
+var ErrNoRetainHook = errors.New("no retain hook registered")
 
-	// SaveSession persists session state.
-	SaveSession(ctx context.Context, session *SessionState) error
+// Event types for Provides().
+const (
+	OnConnectEvent byte = iota
+	OnConnectedEvent
+	OnDisconnectEvent
+	OnSubscribeEvent
+	OnPublishEvent
+	OnPublishReceivedEvent
+	OnPublishDeliverEvent
+	OnSessionCreatedEvent
+	OnSessionResumedEvent
+	OnSessionEndedEvent
+	OnWillPublishEvent
+	StoreRetainedEvent
+	GetRetainedEvent
+)
 
-	// LoadSession loads session state.
-	LoadSession(ctx context.Context, clientID string) (*SessionState, error)
+// HookOptions provides hooks with access to broker capabilities.
+type HookOptions struct {
+	Broker *Broker
+	Log    *slog.Logger
+}
 
-	// DeleteSession removes session state.
-	DeleteSession(ctx context.Context, clientID string) error
+// HookBase provides default implementations for all Hook methods.
+// Embed this in your hook struct, then override only what you need.
+type HookBase struct {
+	Opts *HookOptions
+	Log  *slog.Logger
+}
 
-	// SaveInflight saves an inflight message.
-	SaveInflight(ctx context.Context, clientID string, pkt *packet.Publish) error
+func (h *HookBase) ID() string                      { return "base" }
+func (h *HookBase) Init(opts *HookOptions, _ any) error {
+	h.Opts = opts
+	h.Log = opts.Log
+	return nil
+}
+func (h *HookBase) Stop() error                     { return nil }
+func (h *HookBase) Provides(event byte) bool        { return false }
 
-	// LoadInflight loads all inflight messages for a client.
-	LoadInflight(ctx context.Context, clientID string) ([]*packet.Publish, error)
-
-	// DeleteInflight removes an inflight message.
-	DeleteInflight(ctx context.Context, clientID string, packetID uint16) error
+func (h *HookBase) OnConnect(ctx context.Context, client ClientInfo, pkt *packet.Connect) error {
+	return nil
+}
+func (h *HookBase) OnConnected(ctx context.Context, client ClientInfo)                {}
+func (h *HookBase) OnDisconnect(ctx context.Context, client ClientInfo, err error)    {}
+func (h *HookBase) OnSubscribe(ctx context.Context, client ClientInfo, subs []packet.Subscription) ([]packet.Subscription, error) {
+	return subs, nil
+}
+func (h *HookBase) OnPublish(ctx context.Context, client ClientInfo, pkt *packet.Publish) error {
+	return nil
+}
+func (h *HookBase) CanRead(ctx context.Context, client ClientInfo, topic string) bool { return true }
+func (h *HookBase) OnPublishReceived(ctx context.Context, client ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
+	return pkt, nil
+}
+func (h *HookBase) OnPublishDeliver(ctx context.Context, subscriber ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
+	return pkt, nil
+}
+func (h *HookBase) OnSessionCreated(ctx context.Context, client ClientInfo) {}
+func (h *HookBase) OnSessionResumed(ctx context.Context, client ClientInfo) {}
+func (h *HookBase) OnSessionEnded(ctx context.Context, clientID string)     {}
+func (h *HookBase) OnWillPublish(ctx context.Context, clientID string, will *packet.Publish) (*packet.Publish, error) {
+	return will, nil
+}
+func (h *HookBase) StoreRetained(ctx context.Context, topic string, pkt *packet.Publish) error {
+	return ErrNoRetainHook
+}
+func (h *HookBase) GetRetained(ctx context.Context, filter string) ([]*packet.Publish, error) {
+	return nil, nil
 }
 
 // ClientInfo provides read-only information about a connected client.

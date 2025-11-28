@@ -129,9 +129,10 @@ func (s *Server) ListenTLS(addr string, config *tls.Config) error {
 	return nil
 }
 
-// RegisterHook registers a hook with the broker.
-func (s *Server) RegisterHook(hook Hook) {
-	s.Broker.RegisterHook(hook)
+// AddHook registers a hook with the broker.
+// The config parameter is hook-specific configuration (can be nil).
+func (s *Server) AddHook(hook Hook, config any) error {
+	return s.Broker.AddHook(hook, config)
 }
 
 // Shutdown gracefully shuts down the server.

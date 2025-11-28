@@ -21,29 +21,21 @@ func main() {
 
 	b := broker.New(nil)
 
-	// Add $SYS metrics hook
-	sysHook := hooks.NewSysHook(hooks.SysConfig{
-		Publisher: func(topic string, payload []byte, retain bool) {
-			// Inject $SYS messages into the broker
-			// In a real implementation, you'd call a method on the broker
-			slog.Debug("$SYS publish", "topic", topic, "value", string(payload))
-		},
+	// Add $SYS metrics hook - auto-starts on registration
+	_ = b.AddHook(new(hooks.SysHook), &hooks.SysConfig{
 		Version: "1.0.0",
 	})
-	b.RegisterHook(sysHook)
-	sysHook.Start()
-	defer sysHook.Stop()
 
 	// Add logging hook
-	b.RegisterHook(hooks.NewLoggerHook(hooks.LoggerConfig{
+	_ = b.AddHook(new(hooks.LoggerHook), &hooks.LoggerConfig{
 		Logger: logger,
 		Level:  hooks.LogLevelAll,
-	}))
+	})
 
 	// Add rate limiting (100 messages/second per client)
-	b.RegisterHook(hooks.NewRateLimitHook(hooks.RateLimitConfig{
+	_ = b.AddHook(new(hooks.RateLimitHook), &hooks.RateLimitConfig{
 		PublishRate: 100,
-	}))
+	})
 
 	// Start TCP listener
 	ln, err := b.ListenTCP(":1883")
@@ -63,13 +55,4 @@ func main() {
 
 	slog.Info("Shutting down...")
 	b.Shutdown(context.Background())
-
-	// Print final metrics
-	metrics := sysHook.Metrics()
-	slog.Info("Final metrics",
-		"uptime", metrics.Uptime,
-		"total_clients", metrics.ClientsTotal,
-		"messages_received", metrics.MessagesReceived,
-		"messages_sent", metrics.MessagesSent,
-	)
 }

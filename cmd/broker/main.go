@@ -20,14 +20,8 @@ func main() {
 	// Create server with default configuration
 	server := broker.NewServer(broker.DefaultConfig())
 
-	// Add $SYS metrics - wire publisher to broker.Publish
-	sysHook := hooks.NewSysHook(hooks.SysConfig{
-		Publisher: server.Broker.Publish,
-		Version:   "1.0.0",
-	})
-	server.RegisterHook(sysHook)
-	sysHook.Start()
-	defer sysHook.Stop()
+	// Add $SYS metrics - auto-starts on registration
+	_ = server.AddHook(new(hooks.SysHook), nil)
 
 	// Start TCP listener
 	if err := server.ListenTCP(*addr); err != nil {

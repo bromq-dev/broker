@@ -11,7 +11,8 @@ import (
 
 // ACLHook provides topic-based access control.
 type ACLHook struct {
-	rules    []ACLRule
+	broker.HookBase
+	rules         []ACLRule
 	denyByDefault bool
 }
 
@@ -40,15 +41,28 @@ type ACLConfig struct {
 	DenyByDefault bool
 }
 
-// NewACLHook creates a new ACL authorization hook.
-func NewACLHook(cfg ACLConfig) *ACLHook {
-	return &ACLHook{
-		rules:         cfg.Rules,
-		denyByDefault: cfg.DenyByDefault,
-	}
+func (h *ACLHook) ID() string { return "acl" }
+
+// Provides indicates which events this hook handles.
+func (h *ACLHook) Provides(event byte) bool {
+	return event == broker.OnSubscribeEvent ||
+		event == broker.OnPublishEvent
 }
 
-func (h *ACLHook) ID() string { return "acl" }
+// Init is called when the hook is registered with the broker.
+func (h *ACLHook) Init(opts *broker.HookOptions, config any) error {
+	if err := h.HookBase.Init(opts, config); err != nil {
+		return err
+	}
+
+	// Apply config if provided
+	if cfg, ok := config.(*ACLConfig); ok && cfg != nil {
+		h.rules = cfg.Rules
+		h.denyByDefault = cfg.DenyByDefault
+	}
+
+	return nil
+}
 
 // OnSubscribe filters subscriptions based on read permissions.
 func (h *ACLHook) OnSubscribe(ctx context.Context, client broker.ClientInfo, subs []packet.Subscription) ([]packet.Subscription, error) {

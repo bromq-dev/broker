@@ -16,16 +16,16 @@ func main() {
 	b := broker.New(nil)
 
 	// Add authentication
-	b.RegisterHook(hooks.NewAuthHook(hooks.AuthConfig{
+	_ = b.AddHook(new(hooks.AuthHook), &hooks.AuthConfig{
 		Credentials: map[string]string{
 			"admin":   "admin",
 			"sensor":  "sensor",
 			"display": "display",
 		},
-	}))
+	})
 
 	// Add ACL authorization
-	b.RegisterHook(hooks.NewACLHook(hooks.ACLConfig{
+	_ = b.AddHook(new(hooks.ACLHook), &hooks.ACLConfig{
 		Rules: []hooks.ACLRule{
 			// Admin can read/write everything
 			{Username: "admin", TopicFilter: "#", Read: true, Write: true},
@@ -40,12 +40,12 @@ func main() {
 			{TopicFilter: "public/#", Read: true, Write: true},
 		},
 		DenyByDefault: true,
-	}))
+	})
 
 	// Add logging to see what's happening
-	b.RegisterHook(hooks.NewLoggerHook(hooks.LoggerConfig{
+	_ = b.AddHook(new(hooks.LoggerHook), &hooks.LoggerConfig{
 		Level: hooks.LogLevelConnection | hooks.LogLevelSubscribe,
-	}))
+	})
 
 	// Start TCP listener
 	ln, err := b.ListenTCP(":1883")
