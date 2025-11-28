@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bromq-dev/broker/pkg/broker"
+	"github.com/bromq-dev/broker/pkg/hooks"
 )
 
 func main() {
@@ -19,12 +20,22 @@ func main() {
 	// Create server with default configuration
 	server := broker.NewServer(broker.DefaultConfig())
 
+	// Add $SYS metrics - wire publisher to broker.Publish
+	sysHook := hooks.NewSysHook(hooks.SysConfig{
+		Publisher: server.Broker.Publish,
+		Version:   "1.0.0",
+	})
+	server.RegisterHook(sysHook)
+	sysHook.Start()
+	defer sysHook.Stop()
+
 	// Start TCP listener
 	if err := server.ListenTCP(*addr); err != nil {
 		log.Fatalf("Failed to start listener: %v", err)
 	}
 
 	log.Printf("MQTT broker listening on %s", *addr)
+	log.Println("Subscribe to $SYS/# to see broker metrics")
 
 	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)

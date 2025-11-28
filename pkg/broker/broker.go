@@ -209,6 +209,23 @@ type Stats struct {
 	Retained      int
 }
 
+// Publish injects a message into the broker for delivery to subscribers.
+// This is useful for $SYS topics and other internal messages.
+func (b *Broker) Publish(topic string, payload []byte, retain bool) {
+	pkt := &packet.Publish{
+		TopicName: topic,
+		Payload:   payload,
+		QoS:       packet.QoS0,
+		Retain:    retain,
+	}
+
+	if retain {
+		b.storeRetained(topic, pkt)
+	}
+
+	b.routeMessage(nil, pkt)
+}
+
 // generateClientID generates a unique client ID.
 func generateClientID() string {
 	return fmt.Sprintf("auto-%d", time.Now().UnixNano())
