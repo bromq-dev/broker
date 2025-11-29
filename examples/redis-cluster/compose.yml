@@ -12,7 +12,7 @@ services:
   node1:
     build:
       context: ../..
-      dockerfile: examples/cluster/Dockerfile
+      dockerfile: examples/redis-cluster/Dockerfile
     command: ["-redis", "valkey:6379"]
     ports:
       - "1883:1883"
@@ -23,7 +23,7 @@ services:
   node2:
     build:
       context: ../..
-      dockerfile: examples/cluster/Dockerfile
+      dockerfile: examples/redis-cluster/Dockerfile
     command: ["-redis", "valkey:6379"]
     ports:
       - "1884:1883"

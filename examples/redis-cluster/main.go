@@ -1,12 +1,13 @@
-// Example: Clustered broker using Redis/Valkey for distributed state.
+// Example: Redis-based clustered broker using Redis/Valkey for distributed state.
 //
 // This example demonstrates running multiple broker nodes that share full
-// distributed state via Redis/Valkey, including:
+// distributed state via Redis/Valkey with eventual consistency.
+//
+// Features:
 //   - Node registry with heartbeat and auto-expiry
-//   - Session persistence across nodes
 //   - Subscription storage and route index for targeted fan-out
-//   - Offline message queue using Redis Streams
 //   - Retained message storage with index
+//   - Redis pub/sub for message routing
 //
 // Usage:
 //
@@ -14,10 +15,10 @@
 //	docker run -d -p 6379:6379 redis:alpine
 //
 //	# Start node 1
-//	go run ./examples/cluster -port 1883 -node node1
+//	go run ./examples/redis-cluster -port 1883 -node node1
 //
 //	# Start node 2 (in another terminal)
-//	go run ./examples/cluster -port 1884 -node node2
+//	go run ./examples/redis-cluster -port 1884 -node node2
 //
 //	# Test cross-node messaging
 //	mosquitto_sub -p 1883 -t "test/#" &
@@ -26,7 +27,7 @@
 //
 // With Docker Compose:
 //
-//	cd examples/cluster
+//	cd examples/redis-cluster
 //	docker compose up -d
 package main
 
@@ -41,6 +42,7 @@ import (
 	"time"
 
 	"github.com/bromq-dev/broker/pkg/broker"
+	"github.com/bromq-dev/broker/pkg/cluster"
 	"github.com/bromq-dev/broker/pkg/hooks"
 )
 
@@ -68,13 +70,19 @@ func main() {
 	// Create broker with full capabilities
 	b := broker.New(nil)
 
-	// Add cluster hook for full distributed state
-	if err := b.AddHook(new(hooks.ClusterHook), &hooks.ClusterConfig{
+	// Add Redis cluster hook using the composable cluster package
+	clusterHook, err := cluster.NewRedisCluster(&cluster.RedisConfig{
 		Addr:   *redisAddr,
 		NodeID: *nodeID,
-	}); err != nil {
-		slog.Error("Failed to connect to Redis", "error", err, "addr", *redisAddr)
+	})
+	if err != nil {
+		slog.Error("Failed to create Redis cluster", "error", err, "addr", *redisAddr)
 		slog.Info("Make sure Redis is running: docker run -d -p 6379:6379 redis:alpine")
+		os.Exit(1)
+	}
+
+	if err := b.AddHook(clusterHook, nil); err != nil {
+		slog.Error("Failed to add cluster hook", "error", err)
 		os.Exit(1)
 	}
 
@@ -86,7 +94,7 @@ func main() {
 
 	// Add $SYS metrics
 	_ = b.AddHook(new(hooks.SysHook), &hooks.SysConfig{
-		Version: "1.0.0-cluster",
+		Version: "1.0.0-redis-cluster",
 	})
 
 	// Start listener
@@ -98,12 +106,12 @@ func main() {
 	}
 	defer ln.Close()
 
-	slog.Info("Clustered MQTT broker started",
+	slog.Info("Redis-clustered MQTT broker started",
 		"addr", addr,
 		"node_id", *nodeID,
 		"redis", *redisAddr,
 	)
-	slog.Info("Features: session persistence, targeted fan-out, offline queues, retained messages")
+	slog.Info("Features: eventual consistency, subscription sync, retained messages, redis pub/sub routing")
 
 	// Wait for shutdown
 	sig := make(chan os.Signal, 1)

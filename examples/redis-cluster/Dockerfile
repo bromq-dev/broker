@@ -12,8 +12,8 @@ COPY ./cmd /build/cmd
 COPY ./pkg /build/pkg
 COPY ./examples /build/examples
 
-# Build the cluster example
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o broker ./examples/cluster
+# Build the redis-cluster example
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o broker ./examples/redis-cluster
 
 # Final stage - distroless
 FROM gcr.io/distroless/static-debian12:nonroot

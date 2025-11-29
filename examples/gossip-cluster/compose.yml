@@ -1,0 +1,49 @@
+# Gossip-based clustering - no external services needed!
+services:
+  node1:
+    build:
+      context: ../..
+      dockerfile: examples/gossip-cluster/Dockerfile
+    command:
+      - -node=node1
+      - -gossip-port=7946
+      - -grpc-port=7947
+    ports:
+      - "1883:1883"
+    networks:
+      - mqtt
+
+  node2:
+    build:
+      context: ../..
+      dockerfile: examples/gossip-cluster/Dockerfile
+    command:
+      - -node=node2
+      - -gossip-port=7946
+      - -grpc-port=7947
+      - -join=node1:7946
+    ports:
+      - "1884:1883"
+    networks:
+      - mqtt
+    depends_on:
+      - node1
+
+  node3:
+    build:
+      context: ../..
+      dockerfile: examples/gossip-cluster/Dockerfile
+    command:
+      - -node=node3
+      - -gossip-port=7946
+      - -grpc-port=7947
+      - -join=node1:7946
+    ports:
+      - "1885:1883"
+    networks:
+      - mqtt
+    depends_on:
+      - node1
+
+networks:
+  mqtt:
