@@ -30,3 +30,14 @@ services:
     depends_on:
       valkey:
         condition: service_healthy
+
+  node3:
+    build:
+      context: ../..
+      dockerfile: examples/redis-cluster/Dockerfile
+    command: ["-redis", "valkey:6379"]
+    ports:
+      - "1885:1883"
+    depends_on:
+      valkey:
+        condition: service_healthy
