@@ -94,14 +94,22 @@ func (s *Session) GetAllSubscriptions() map[string]*sessionSub {
 }
 
 // QueueMessage queues a message for delivery when the client reconnects.
-func (s *Session) QueueMessage(pkt *packet.Publish) {
+// Returns false if the queue limit (maxQueue) has been reached.
+// A maxQueue of 0 means unlimited.
+func (s *Session) QueueMessage(pkt *packet.Publish, maxQueue int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Enforce queue limit
+	if maxQueue > 0 && len(s.pending) >= maxQueue {
+		return false
+	}
 
 	s.pending = append(s.pending, &pendingMsg{
 		publish:   pkt,
 		timestamp: time.Now(),
 	})
+	return true
 }
 
 // DrainPending returns and clears all pending messages.

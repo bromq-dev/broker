@@ -188,13 +188,16 @@ func (b *Broker) routeMessage(sender *Client, pkt *packet.Publish) {
 		if sub.Client.connected.Load() {
 			if !sub.Client.Send(deliverPkt) && deliverQoS > packet.QoS0 {
 				// Queue full, store for later
-				sub.Client.session.QueueMessage(deliverPkt)
+				sub.Client.session.QueueMessage(deliverPkt, b.config.MaxSessionQueue)
 			} else if deliverQoS > packet.QoS0 {
-				sub.Client.trackInflight(deliverPkt)
+				if !sub.Client.trackInflight(deliverPkt) {
+					// Inflight limit reached, queue for later
+					sub.Client.session.QueueMessage(deliverPkt, b.config.MaxSessionQueue)
+				}
 			}
 		} else if deliverQoS > packet.QoS0 {
 			// Client offline, queue message
-			sub.Client.session.QueueMessage(deliverPkt)
+			sub.Client.session.QueueMessage(deliverPkt, b.config.MaxSessionQueue)
 		}
 	}
 }

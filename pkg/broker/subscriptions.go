@@ -39,6 +39,20 @@ type sharedGroup struct {
 	mu          sync.Mutex
 }
 
+// next returns the next subscriber in round-robin order.
+// Returns nil if the group is empty.
+func (g *sharedGroup) next() *Subscriber {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if len(g.subscribers) == 0 {
+		return nil
+	}
+	sub := g.subscribers[g.nextIdx%len(g.subscribers)]
+	g.nextIdx++
+	return sub
+}
+
 // NewSubscriptionTree creates a new subscription tree.
 func NewSubscriptionTree() *SubscriptionTree {
 	return &SubscriptionTree{
@@ -200,16 +214,9 @@ func (t *SubscriptionTree) matchRecursive(node *trieNode, levels []string, idx i
 
 		// Add one subscriber from each shared group (round-robin)
 		for _, group := range node.shared {
-			if len(group.subscribers) > 0 {
-				group.mu.Lock()
-				sub := group.subscribers[group.nextIdx%len(group.subscribers)]
-				group.nextIdx++
-				group.mu.Unlock()
-
-				if !seen[sub.Client] {
-					seen[sub.Client] = true
-					*result = append(*result, sub)
-				}
+			if sub := group.next(); sub != nil && !seen[sub.Client] {
+				seen[sub.Client] = true
+				*result = append(*result, sub)
 			}
 		}
 
@@ -222,16 +229,9 @@ func (t *SubscriptionTree) matchRecursive(node *trieNode, levels []string, idx i
 				}
 			}
 			for _, group := range hashNode.shared {
-				if len(group.subscribers) > 0 {
-					group.mu.Lock()
-					sub := group.subscribers[group.nextIdx%len(group.subscribers)]
-					group.nextIdx++
-					group.mu.Unlock()
-
-					if !seen[sub.Client] {
-						seen[sub.Client] = true
-						*result = append(*result, sub)
-					}
+				if sub := group.next(); sub != nil && !seen[sub.Client] {
+					seen[sub.Client] = true
+					*result = append(*result, sub)
 				}
 			}
 		}
@@ -264,16 +264,9 @@ func (t *SubscriptionTree) matchRecursive(node *trieNode, levels []string, idx i
 			}
 		}
 		for _, group := range hashNode.shared {
-			if len(group.subscribers) > 0 {
-				group.mu.Lock()
-				sub := group.subscribers[group.nextIdx%len(group.subscribers)]
-				group.nextIdx++
-				group.mu.Unlock()
-
-				if !seen[sub.Client] {
-					seen[sub.Client] = true
-					*result = append(*result, sub)
-				}
+			if sub := group.next(); sub != nil && !seen[sub.Client] {
+				seen[sub.Client] = true
+				*result = append(*result, sub)
 			}
 		}
 	}

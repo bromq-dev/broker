@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -185,14 +187,22 @@ func (c *Client) nextID() uint16 {
 }
 
 // trackInflight tracks an outbound message for QoS 1/2.
-func (c *Client) trackInflight(pkt *packet.Publish) {
+// Returns false if the inflight limit has been reached.
+func (c *Client) trackInflight(pkt *packet.Publish) bool {
 	c.packetIDMu.Lock()
 	defer c.packetIDMu.Unlock()
+
+	// Enforce MaxInflight limit
+	maxInflight := c.broker.config.MaxInflight
+	if maxInflight > 0 && len(c.inFlightOut) >= maxInflight {
+		return false
+	}
 
 	c.inFlightOut[pkt.PacketID] = &inflightMsg{
 		pkt:       pkt,
 		timestamp: time.Now(),
 	}
+	return true
 }
 
 // ackInflight acknowledges an outbound message.
@@ -287,6 +297,17 @@ func (c *Client) readLoop() {
 
 // writeLoop sends packets to the connection.
 func (c *Client) writeLoop() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("panic in write loop",
+				"client", c.clientID,
+				"panic", r,
+				"stack", string(debug.Stack()),
+			)
+			c.Close()
+		}
+	}()
+
 	buf := make([]byte, 65536)
 
 	for pkt := range c.outbound {

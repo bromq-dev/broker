@@ -3,7 +3,9 @@ package broker
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -21,8 +23,11 @@ type Config struct {
 	// MaxPacketSize limits the maximum packet size (0 = protocol max ~256MB).
 	MaxPacketSize uint32
 
-	// MaxInflight limits the number of unacknowledged QoS 1/2 messages per client.
+	// MaxInflight limits the number of unacknowledged QoS 1/2 messages per client (0 = unlimited).
 	MaxInflight int
+
+	// MaxSessionQueue limits the number of pending messages queued for offline clients (0 = unlimited).
+	MaxSessionQueue int
 
 	// RetainAvailable indicates whether retained messages are supported.
 	RetainAvailable bool
@@ -43,10 +48,11 @@ type Config struct {
 // DefaultConfig returns a configuration with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		MaxConnections:       0, // Unlimited
+		MaxConnections:       0,     // Unlimited
 		ConnectTimeout:       10 * time.Second,
-		MaxPacketSize:        0, // Protocol max
-		MaxInflight:          65535,
+		MaxPacketSize:        0,     // Protocol max
+		MaxInflight:          65535, // MQTT spec max
+		MaxSessionQueue:      1000,  // Limit offline queue
 		RetainAvailable:      true,
 		WildcardSubAvailable: true,
 		SubIDAvailable:       true,
@@ -118,9 +124,29 @@ func (b *Broker) AddHook(hook Hook, config any) error {
 // HandleConnection handles a new client connection.
 // This should be called by the transport layer when a new connection is accepted.
 func (b *Broker) HandleConnection(conn net.Conn) {
+	// Enforce MaxConnections
+	if b.config.MaxConnections > 0 {
+		b.clientsMu.RLock()
+		count := len(b.clients)
+		b.clientsMu.RUnlock()
+		if count >= b.config.MaxConnections {
+			conn.Close()
+			return
+		}
+	}
+
 	b.wg.Add(1)
 	go func() {
 		defer b.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("panic in connection handler",
+					"panic", r,
+					"stack", string(debug.Stack()),
+				)
+				conn.Close()
+			}
+		}()
 		b.handleConnection(conn)
 	}()
 }
