@@ -44,6 +44,7 @@ import (
 
 	"github.com/bromq-dev/broker/pkg/broker"
 	"github.com/bromq-dev/broker/pkg/hooks"
+	"github.com/bromq-dev/broker/pkg/listeners"
 )
 
 func main() {
@@ -79,36 +80,39 @@ func main() {
 	})
 
 	// Plain TCP on :1883 (optional, for local testing)
-	tcpLn, err := b.ListenTCP(":1883")
-	if err != nil {
-		slog.Error("Failed to start TCP listener", "error", err)
+	tcp := listeners.NewTCP("tcp", ":1883", nil)
+	if err := b.AddListener(tcp); err != nil {
+		slog.Error("Failed to add TCP listener", "error", err)
 		os.Exit(1)
 	}
-	defer tcpLn.Close()
 
 	// TLS TCP on :8883 (standard MQTTS port)
-	tlsLn, err := b.ListenTLS(":8883", tlsConfig)
-	if err != nil {
-		slog.Error("Failed to start TLS listener", "error", err)
+	tcpTLS := listeners.NewTCP("tcp+tls", ":8883", &listeners.TCPConfig{
+		TLSConfig: tlsConfig,
+	})
+	if err := b.AddListener(tcpTLS); err != nil {
+		slog.Error("Failed to add TLS listener", "error", err)
 		os.Exit(1)
 	}
-	defer tlsLn.Close()
 
 	// Plain WebSocket on :8083 (optional, for local testing)
-	wsLn, err := b.ListenWebSocket(":8083", "/mqtt")
-	if err != nil {
-		slog.Error("Failed to start WebSocket listener", "error", err)
+	ws := listeners.NewWebSocket("ws", ":8083", &listeners.WebSocketConfig{
+		Path: "/mqtt",
+	})
+	if err := b.AddListener(ws); err != nil {
+		slog.Error("Failed to add WebSocket listener", "error", err)
 		os.Exit(1)
 	}
-	defer wsLn.Close()
 
 	// TLS WebSocket on :8084 (secure WebSocket)
-	wssLn, err := b.ListenWebSocketTLS(":8084", "/mqtt", tlsConfig)
-	if err != nil {
-		slog.Error("Failed to start WSS listener", "error", err)
+	wss := listeners.NewWebSocket("wss", ":8084", &listeners.WebSocketConfig{
+		Path:      "/mqtt",
+		TLSConfig: tlsConfig,
+	})
+	if err := b.AddListener(wss); err != nil {
+		slog.Error("Failed to add WSS listener", "error", err)
 		os.Exit(1)
 	}
-	defer wssLn.Close()
 
 	slog.Info("MQTT broker started with TLS",
 		"tcp", ":1883",

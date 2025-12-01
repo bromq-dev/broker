@@ -34,6 +34,7 @@ import (
 
 	"github.com/bromq-dev/broker/pkg/broker"
 	"github.com/bromq-dev/broker/pkg/hooks"
+	"github.com/bromq-dev/broker/pkg/listeners"
 )
 
 func main() {
@@ -53,21 +54,21 @@ func main() {
 	// Add $SYS metrics
 	_ = b.AddHook(new(hooks.SysHook), nil)
 
-	// Start TCP listener on :1883
-	tcpLn, err := b.ListenTCP(":1883")
-	if err != nil {
-		slog.Error("Failed to start TCP listener", "error", err)
+	// Add TCP listener on :1883
+	tcp := listeners.NewTCP("tcp", ":1883", nil)
+	if err := b.AddListener(tcp); err != nil {
+		slog.Error("Failed to add TCP listener", "error", err)
 		os.Exit(1)
 	}
-	defer tcpLn.Close()
 
-	// Start WebSocket listener on :8083/mqtt
-	wsLn, err := b.ListenWebSocket(":8083", "/mqtt")
-	if err != nil {
-		slog.Error("Failed to start WebSocket listener", "error", err)
+	// Add WebSocket listener on :8083/mqtt
+	ws := listeners.NewWebSocket("ws", ":8083", &listeners.WebSocketConfig{
+		Path: "/mqtt",
+	})
+	if err := b.AddListener(ws); err != nil {
+		slog.Error("Failed to add WebSocket listener", "error", err)
 		os.Exit(1)
 	}
-	defer wsLn.Close()
 
 	slog.Info("MQTT broker started",
 		"tcp", ":1883",

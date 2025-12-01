@@ -10,6 +10,7 @@ import (
 
 	"github.com/bromq-dev/broker/pkg/broker"
 	"github.com/bromq-dev/broker/pkg/hooks"
+	"github.com/bromq-dev/broker/pkg/listeners"
 )
 
 func main() {
@@ -47,12 +48,11 @@ func main() {
 		Level: hooks.LogLevelConnection | hooks.LogLevelSubscribe,
 	})
 
-	// Start TCP listener
-	ln, err := b.ListenTCP(":1883")
-	if err != nil {
+	// Add TCP listener
+	tcp := listeners.NewTCP("tcp", ":1883", nil)
+	if err := b.AddListener(tcp); err != nil {
 		log.Fatal(err)
 	}
-	defer ln.Close()
 
 	log.Println("MQTT broker with ACL listening on :1883")
 	log.Println("Users:")

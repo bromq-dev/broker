@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bromq-dev/broker/pkg/listeners"
 	"github.com/bromq-dev/broker/pkg/packet"
 )
 
@@ -20,7 +21,8 @@ type Config struct {
 	// ConnectTimeout is the time allowed for a client to send CONNECT after connecting.
 	ConnectTimeout time.Duration
 
-	// MaxPacketSize limits the maximum packet size (0 = protocol max ~256MB).
+	// MaxPacketSize limits the maximum inbound packet size in bytes (0 = protocol max ~256MB).
+	// For outbound, the broker respects each client's advertised Maximum Packet Size (MQTT 5.0).
 	MaxPacketSize uint32
 
 	// MaxInflight limits the number of unacknowledged QoS 1/2 messages per client (0 = unlimited).
@@ -28,6 +30,11 @@ type Config struct {
 
 	// MaxSessionQueue limits the number of pending messages queued for offline clients (0 = unlimited).
 	MaxSessionQueue int
+
+	// ClientOutboundBuffer is the number of messages in each client's outbound queue.
+	// QoS 0 messages are dropped when this buffer is full. Default: 4096.
+	// Memory bound per client ≈ MaxPacketSize × ClientOutboundBuffer.
+	ClientOutboundBuffer int
 
 	// RetainAvailable indicates whether retained messages are supported.
 	RetainAvailable bool
@@ -53,6 +60,7 @@ func DefaultConfig() *Config {
 		MaxPacketSize:        0,     // Protocol max
 		MaxInflight:          65535, // MQTT spec max
 		MaxSessionQueue:      1000,  // Limit offline queue
+		ClientOutboundBuffer: 4096,  // Per-client outbound queue
 		RetainAvailable:      true,
 		WildcardSubAvailable: true,
 		SubIDAvailable:       true,
@@ -80,6 +88,10 @@ type Broker struct {
 	retainedMu sync.RWMutex
 	retained   map[string]*packet.Publish
 
+	// Listeners
+	listenersMu sync.Mutex
+	listeners   map[string]listeners.Listener
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -101,6 +113,7 @@ func New(config *Config) *Broker {
 		sessions:      NewSessionManager(),
 		subscriptions: NewSubscriptionTree(),
 		retained:      make(map[string]*packet.Publish),
+		listeners:     make(map[string]listeners.Listener),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -118,6 +131,26 @@ func (b *Broker) AddHook(hook Hook, config any) error {
 		return err
 	}
 	b.hooks.Register(hook)
+	return nil
+}
+
+// AddListener registers and starts a listener.
+// The listener will begin accepting connections immediately.
+func (b *Broker) AddListener(l listeners.Listener) error {
+	b.listenersMu.Lock()
+	if _, exists := b.listeners[l.ID()]; exists {
+		b.listenersMu.Unlock()
+		return fmt.Errorf("listener %q already exists", l.ID())
+	}
+	b.listeners[l.ID()] = l
+	b.listenersMu.Unlock()
+
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		l.Serve(b)
+	}()
+
 	return nil
 }
 
@@ -190,6 +223,13 @@ func (b *Broker) handleConnection(conn net.Conn) {
 // Shutdown gracefully shuts down the broker.
 func (b *Broker) Shutdown(ctx context.Context) error {
 	b.cancel()
+
+	// Close all listeners first
+	b.listenersMu.Lock()
+	for _, l := range b.listeners {
+		l.Close()
+	}
+	b.listenersMu.Unlock()
 
 	// Stop all hooks
 	b.hooks.StopAll()

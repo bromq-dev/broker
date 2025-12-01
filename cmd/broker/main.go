@@ -11,21 +11,23 @@ import (
 
 	"github.com/bromq-dev/broker/pkg/broker"
 	"github.com/bromq-dev/broker/pkg/hooks"
+	"github.com/bromq-dev/broker/pkg/listeners"
 )
 
 func main() {
 	addr := flag.String("addr", ":1883", "MQTT listen address")
 	flag.Parse()
 
-	// Create server with default configuration
-	server := broker.NewServer(broker.DefaultConfig())
+	// Create broker with default configuration
+	b := broker.New(nil)
 
 	// Add $SYS metrics - auto-starts on registration
-	_ = server.AddHook(new(hooks.SysHook), nil)
+	_ = b.AddHook(new(hooks.SysHook), nil)
 
-	// Start TCP listener
-	if err := server.ListenTCP(*addr); err != nil {
-		log.Fatalf("Failed to start listener: %v", err)
+	// Add TCP listener
+	tcp := listeners.NewTCP("tcp", *addr, nil)
+	if err := b.AddListener(tcp); err != nil {
+		log.Fatalf("Failed to add listener: %v", err)
 	}
 
 	log.Printf("MQTT broker listening on %s", *addr)
@@ -41,7 +43,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
+	if err := b.Shutdown(ctx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
 

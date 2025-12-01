@@ -49,6 +49,7 @@ import (
 	"github.com/bromq-dev/broker/pkg/broker"
 	"github.com/bromq-dev/broker/pkg/cluster"
 	"github.com/bromq-dev/broker/pkg/hooks"
+	"github.com/bromq-dev/broker/pkg/listeners"
 )
 
 func main() {
@@ -109,14 +110,13 @@ func main() {
 		Version: "1.0.0-gossip-cluster",
 	})
 
-	// Start listener
+	// Add TCP listener
 	addr := fmt.Sprintf(":%d", *port)
-	ln, err := b.ListenTCP(addr)
-	if err != nil {
-		slog.Error("Failed to listen", "error", err)
+	tcp := listeners.NewTCP("tcp", addr, nil)
+	if err := b.AddListener(tcp); err != nil {
+		slog.Error("Failed to add listener", "error", err)
 		os.Exit(1)
 	}
-	defer ln.Close()
 
 	slog.Info("Gossip-clustered MQTT broker started",
 		"addr", addr,

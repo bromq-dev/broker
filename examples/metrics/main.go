@@ -10,6 +10,7 @@ import (
 
 	"github.com/bromq-dev/broker/pkg/broker"
 	"github.com/bromq-dev/broker/pkg/hooks"
+	"github.com/bromq-dev/broker/pkg/listeners"
 )
 
 func main() {
@@ -37,13 +38,12 @@ func main() {
 		PublishRate: 100,
 	})
 
-	// Start TCP listener
-	ln, err := b.ListenTCP(":1883")
-	if err != nil {
-		slog.Error("Failed to listen", "error", err)
+	// Add TCP listener
+	tcp := listeners.NewTCP("tcp", ":1883", nil)
+	if err := b.AddListener(tcp); err != nil {
+		slog.Error("Failed to add listener", "error", err)
 		os.Exit(1)
 	}
-	defer ln.Close()
 
 	slog.Info("MQTT broker started", "addr", ":1883")
 	slog.Info("Features enabled: $SYS metrics, logging, rate limiting (100 msg/s)")
