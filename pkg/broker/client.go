@@ -76,7 +76,7 @@ func newClient(conn net.Conn, broker *Broker) *Client {
 	if bufferSize <= 0 {
 		bufferSize = 4096
 	}
-	reader := packet.NewReader(conn, 8192)
+	reader := packet.NewReader(conn, 4096)
 	if broker.config.MaxPacketSize > 0 {
 		reader.SetMaxPacketSize(broker.config.MaxPacketSize)
 	}
@@ -317,12 +317,21 @@ func (c *Client) writeLoop() {
 		}
 	}()
 
-	buf := make([]byte, 65536)
+	buf := packet.GetBuffer()
+	defer packet.PutBuffer(buf)
 
 	for pkt := range c.outbound {
 		size := pkt.EncodedSize()
 		if size > len(buf) {
-			buf = make([]byte, size)
+			// Need larger buffer - allocate temporarily
+			largeBuf := make([]byte, size)
+			n := pkt.Encode(largeBuf)
+			if n > 0 {
+				if _, err := c.conn.Write(largeBuf[:n]); err != nil {
+					return
+				}
+			}
+			continue
 		}
 
 		n := pkt.Encode(buf)

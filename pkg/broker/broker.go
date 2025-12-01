@@ -32,7 +32,7 @@ type Config struct {
 	MaxSessionQueue int
 
 	// ClientOutboundBuffer is the number of messages in each client's outbound queue.
-	// QoS 0 messages are dropped when this buffer is full. Default: 4096.
+	// QoS 0 messages are dropped when this buffer is full. Default: 256.
 	// Memory bound per client ≈ MaxPacketSize × ClientOutboundBuffer.
 	ClientOutboundBuffer int
 
@@ -60,7 +60,7 @@ func DefaultConfig() *Config {
 		MaxPacketSize:        0,     // Protocol max
 		MaxInflight:          65535, // MQTT spec max
 		MaxSessionQueue:      1000,  // Limit offline queue
-		ClientOutboundBuffer: 4096,  // Per-client outbound queue
+		ClientOutboundBuffer: 256, // Per-client outbound queue
 		RetainAvailable:      true,
 		WildcardSubAvailable: true,
 		SubIDAvailable:       true,

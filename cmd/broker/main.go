@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof" // Import for side effects - registers /debug/pprof handlers
 	"os"
 	"os/signal"
 	"strings"
@@ -26,8 +28,9 @@ var (
 	credentials credentialMap
 	acls        aclSlice
 
-	certFile = flag.String("cert", "", "TLS certificate file (optional)")
-	keyFile  = flag.String("key", "", "TLS private key file (optional)")
+	certFile  = flag.String("cert", "", "TLS certificate file (optional)")
+	keyFile   = flag.String("key", "", "TLS private key file (optional)")
+	pprofAddr = flag.String("pprof", "", "pprof HTTP server address (e.g. :6060)")
 )
 
 // Custom flag type for accumulating credentials
@@ -152,6 +155,16 @@ func main() {
 			log.Fatalf("Failed to add TLS listener: %v", err)
 		}
 		log.Printf("TLS listening on %s", *mqttsAddr)
+	}
+
+	// Start pprof server if enabled
+	if *pprofAddr != "" {
+		go func() {
+			log.Printf("pprof server listening on http://%s/debug/pprof/", *pprofAddr)
+			if err := http.ListenAndServe(*pprofAddr, nil); err != nil {
+				log.Printf("pprof server error: %v", err)
+			}
+		}()
 	}
 
 	log.Printf("MQTT broker listening on %s", *mqttAddr)

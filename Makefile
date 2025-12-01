@@ -31,3 +31,6 @@ conformance-v5: install-testmqtt ## Run MQTT 5.0 Conformance Tests
 	@testmqtt conformance --version 5 --verbose
 
 conformance: conformance-v3 conformance-v5 ## Run all Conformance Tests
+
+pprof: build ## Run pprof profiling server
+	@$(BIN_DIR)/broker --pprof :6060
