@@ -3,6 +3,12 @@ services:
     build: .
     ports:
       - 1883:1883
+    command:
+      - -credential=${ADMIN_USERNAME:-admin}:${ADMIN_PASSWORD:-admin}
+      - -acl=${ADMIN_USERNAME:-admin}:#:rw
+      - -acl=${ADMIN_USERNAME:-admin}:$$SYS/#:r
+      - -credential=anon:anon
+      - -acl=anon:anon/#:r
     ulimits:
       nofile:
         soft: 65536

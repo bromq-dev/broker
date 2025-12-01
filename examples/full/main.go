@@ -54,7 +54,6 @@ func main() {
 			// Public topics for everyone
 			{TopicFilter: "public/#", Read: true, Write: true},
 		},
-		DenyByDefault: true,
 	})
 
 	// 3. Rate limiting - prevent abuse

@@ -40,7 +40,6 @@ func main() {
 			// Everyone can use the public topic
 			{TopicFilter: "public/#", Read: true, Write: true},
 		},
-		DenyByDefault: true,
 	})
 
 	// Add logging to see what's happening

@@ -12,8 +12,8 @@ import (
 // ACLHook provides topic-based access control.
 type ACLHook struct {
 	broker.HookBase
-	rules         []ACLRule
-	denyByDefault bool
+	rules          []ACLRule
+	allowByDefault bool
 }
 
 // ACLRule defines an access control rule.
@@ -37,8 +37,8 @@ type ACLConfig struct {
 	// Rules defines the access control rules (evaluated in order).
 	Rules []ACLRule
 
-	// DenyByDefault denies access if no rule matches (default: false = allow).
-	DenyByDefault bool
+	// AllowByDefault allows access if no rule matches (default: false = deny).
+	AllowByDefault bool
 }
 
 func (h *ACLHook) ID() string { return "acl" }
@@ -58,7 +58,7 @@ func (h *ACLHook) Init(opts *broker.HookOptions, config any) error {
 	// Apply config if provided
 	if cfg, ok := config.(*ACLConfig); ok && cfg != nil {
 		h.rules = cfg.Rules
-		h.denyByDefault = cfg.DenyByDefault
+		h.allowByDefault = cfg.AllowByDefault
 	}
 
 	return nil
@@ -106,7 +106,7 @@ func (h *ACLHook) canAccess(client broker.ClientInfo, topicPattern string, read 
 		return rule.Write
 	}
 	// No rule matched
-	return !h.denyByDefault
+	return h.allowByDefault
 }
 
 func (h *ACLHook) matchClient(rule ACLRule, client broker.ClientInfo) bool {
