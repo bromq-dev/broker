@@ -21,12 +21,13 @@ type Client struct {
 	reader *packet.Reader
 
 	// Client info (set after CONNECT)
-	clientID   string
-	username   string
-	version    packet.Version
-	cleanStart bool
-	keepAlive  uint16
-	properties *packet.Properties
+	clientID      string
+	username      string
+	version       packet.Version
+	cleanStart    bool
+	keepAlive     uint16
+	properties    *packet.Properties
+	maxPacketSize uint32 // Client's max packet size (0 = no limit)
 
 	// Session
 	session *Session
@@ -71,10 +72,18 @@ type inflightMsg struct {
 // newClient creates a new client from a network connection.
 func newClient(conn net.Conn, broker *Broker) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
+	bufferSize := broker.config.ClientOutboundBuffer
+	if bufferSize <= 0 {
+		bufferSize = 4096
+	}
+	reader := packet.NewReader(conn, 8192)
+	if broker.config.MaxPacketSize > 0 {
+		reader.SetMaxPacketSize(broker.config.MaxPacketSize)
+	}
 	return &Client{
 		conn:         conn,
-		reader:       packet.NewReader(conn, 8192),
-		outbound:     make(chan packet.Packet, 256),
+		reader:       reader,
+		outbound:     make(chan packet.Packet, bufferSize),
 		nextPacketID: 1,
 		inFlightOut:  make(map[uint16]*inflightMsg),
 		inFlightIn:   make(map[uint16]*packet.Publish),

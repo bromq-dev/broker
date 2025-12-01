@@ -18,6 +18,11 @@ func (b *Broker) handleConnect(client *Client, pkt *packet.Connect) error {
 	client.properties = pkt.Properties
 	client.reader.SetVersion(pkt.ProtocolVersion)
 
+	// Extract client's max packet size (MQTT 5.0)
+	if pkt.Properties != nil && pkt.Properties.MaxPacketSize != nil {
+		client.maxPacketSize = *pkt.Properties.MaxPacketSize
+	}
+
 	// Generate client ID if empty
 	if client.clientID == "" {
 		if !pkt.CleanStart {

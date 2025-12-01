@@ -184,20 +184,39 @@ func (b *Broker) routeMessage(sender *Client, pkt *packet.Publish) {
 			deliverPkt.PacketID = sub.Client.nextID()
 		}
 
+		// Check client's max packet size (MQTT 5.0)
+		if sub.Client.maxPacketSize > 0 {
+			pktSize := uint32(deliverPkt.EncodedSize())
+			if pktSize > sub.Client.maxPacketSize {
+				b.hooks.OnMessageDropped(sub.Client, deliverPkt, DropReasonPacketTooLarge)
+				continue
+			}
+		}
+
 		// Send to client
 		if sub.Client.connected.Load() {
-			if !sub.Client.Send(deliverPkt) && deliverQoS > packet.QoS0 {
-				// Queue full, store for later
-				sub.Client.session.QueueMessage(deliverPkt, b.config.MaxSessionQueue)
+			if !sub.Client.Send(deliverPkt) {
+				if deliverQoS > packet.QoS0 {
+					// Queue full, store for later
+					sub.Client.session.QueueMessage(deliverPkt, b.config.MaxSessionQueue)
+				} else {
+					// QoS 0 dropped due to full outbound buffer
+					b.hooks.OnMessageDropped(sub.Client, deliverPkt, DropReasonQueueFull)
+				}
 			} else if deliverQoS > packet.QoS0 {
 				if !sub.Client.trackInflight(deliverPkt) {
 					// Inflight limit reached, queue for later
 					sub.Client.session.QueueMessage(deliverPkt, b.config.MaxSessionQueue)
 				}
 			}
-		} else if deliverQoS > packet.QoS0 {
-			// Client offline, queue message
-			sub.Client.session.QueueMessage(deliverPkt, b.config.MaxSessionQueue)
+		} else {
+			if deliverQoS > packet.QoS0 {
+				// Client offline, queue message
+				sub.Client.session.QueueMessage(deliverPkt, b.config.MaxSessionQueue)
+			} else {
+				// QoS 0 to offline client - dropped per MQTT spec
+				b.hooks.OnMessageDropped(sub.Client, deliverPkt, DropReasonClientOffline)
+			}
 		}
 	}
 }

@@ -21,6 +21,7 @@ type Hooks struct {
 	onPublish         []Hook
 	onPublishReceived []Hook
 	onPublishDeliver  []Hook
+	onMessageDropped  []Hook
 	onSessionCreated  []Hook
 	onSessionResumed  []Hook
 	onSessionEnded    []Hook
@@ -63,6 +64,9 @@ func (h *Hooks) Register(hook Hook) {
 	}
 	if hook.Provides(OnPublishDeliverEvent) {
 		h.onPublishDeliver = append(h.onPublishDeliver, hook)
+	}
+	if hook.Provides(OnMessageDroppedEvent) {
+		h.onMessageDropped = append(h.onMessageDropped, hook)
 	}
 	if hook.Provides(OnSessionCreatedEvent) {
 		h.onSessionCreated = append(h.onSessionCreated, hook)
@@ -216,6 +220,17 @@ func (h *Hooks) OnPublishDeliver(ctx context.Context, subscriber ClientInfo, pkt
 		}
 	}
 	return result, nil
+}
+
+// OnMessageDropped notifies all hooks that provide OnMessageDroppedEvent.
+func (h *Hooks) OnMessageDropped(client ClientInfo, pkt *packet.Publish, reason DropReason) {
+	h.mu.RLock()
+	hooks := h.onMessageDropped
+	h.mu.RUnlock()
+
+	for _, hook := range hooks {
+		hook.OnMessageDropped(client, pkt, reason)
+	}
 }
 
 // OnSessionCreated notifies all hooks that provide OnSessionCreatedEvent.

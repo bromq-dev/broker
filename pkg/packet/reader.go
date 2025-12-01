@@ -8,11 +8,12 @@ import (
 // Reader reads MQTT packets from an io.Reader.
 // It manages buffer pooling for efficient memory usage.
 type Reader struct {
-	r       io.Reader
-	buf     []byte
-	pos     int
-	end     int
-	version Version // Protocol version for decoding
+	r             io.Reader
+	buf           []byte
+	pos           int
+	end           int
+	version       Version // Protocol version for decoding
+	maxPacketSize uint32  // Max packet size (0 = protocol max)
 }
 
 // NewReader creates a new packet reader.
@@ -25,6 +26,12 @@ func NewReader(r io.Reader, bufSize int) *Reader {
 		buf:     make([]byte, bufSize),
 		version: Version311, // Default, updated after CONNECT
 	}
+}
+
+// SetMaxPacketSize sets the maximum allowed packet size.
+// If 0, the protocol maximum is used.
+func (r *Reader) SetMaxPacketSize(size uint32) {
+	r.maxPacketSize = size
 }
 
 // SetVersion sets the protocol version for packet decoding.
@@ -90,8 +97,12 @@ func (r *Reader) ReadPacket() (Packet, error) {
 		}
 	}
 
-	// Check packet size
-	if remainingLength > MaxRemainingLength {
+	// Check packet size against configured limit
+	maxSize := r.maxPacketSize
+	if maxSize == 0 {
+		maxSize = MaxPacketSize
+	}
+	if uint32(headerLen)+remainingLength > maxSize {
 		return nil, ErrPacketTooLarge
 	}
 

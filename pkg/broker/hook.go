@@ -41,6 +41,7 @@ type Hook interface {
 	// Message handling
 	OnPublishReceived(ctx context.Context, client ClientInfo, pkt *packet.Publish) (*packet.Publish, error)
 	OnPublishDeliver(ctx context.Context, subscriber ClientInfo, pkt *packet.Publish) (*packet.Publish, error)
+	OnMessageDropped(client ClientInfo, pkt *packet.Publish, reason DropReason)
 
 	// Session lifecycle
 	OnSessionCreated(ctx context.Context, client ClientInfo)
@@ -67,12 +68,25 @@ const (
 	OnPublishEvent
 	OnPublishReceivedEvent
 	OnPublishDeliverEvent
+	OnMessageDroppedEvent
 	OnSessionCreatedEvent
 	OnSessionResumedEvent
 	OnSessionEndedEvent
 	OnWillPublishEvent
 	StoreRetainedEvent
 	GetRetainedEvent
+)
+
+// DropReason indicates why a message was dropped.
+type DropReason byte
+
+const (
+	// DropReasonQueueFull indicates the client's outbound buffer is full.
+	DropReasonQueueFull DropReason = iota
+	// DropReasonClientOffline indicates a QoS 0 message to an offline client.
+	DropReasonClientOffline
+	// DropReasonPacketTooLarge indicates the packet exceeds client's max packet size.
+	DropReasonPacketTooLarge
 )
 
 // HookOptions provides hooks with access to broker capabilities.
@@ -115,7 +129,8 @@ func (h *HookBase) OnPublishReceived(ctx context.Context, client ClientInfo, pkt
 func (h *HookBase) OnPublishDeliver(ctx context.Context, subscriber ClientInfo, pkt *packet.Publish) (*packet.Publish, error) {
 	return pkt, nil
 }
-func (h *HookBase) OnSessionCreated(ctx context.Context, client ClientInfo) {}
+func (h *HookBase) OnMessageDropped(client ClientInfo, pkt *packet.Publish, reason DropReason) {}
+func (h *HookBase) OnSessionCreated(ctx context.Context, client ClientInfo)                   {}
 func (h *HookBase) OnSessionResumed(ctx context.Context, client ClientInfo) {}
 func (h *HookBase) OnSessionEnded(ctx context.Context, clientID string)     {}
 func (h *HookBase) OnWillPublish(ctx context.Context, clientID string, will *packet.Publish) (*packet.Publish, error) {
