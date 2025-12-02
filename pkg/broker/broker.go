@@ -106,7 +106,7 @@ func New(config *Config) *Broker {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &Broker{
+	b := &Broker{
 		config:        config,
 		hooks:         NewHooks(),
 		clients:       make(map[string]*Client),
@@ -117,6 +117,11 @@ func New(config *Config) *Broker {
 		ctx:           ctx,
 		cancel:        cancel,
 	}
+
+	// Start background session cleanup
+	go b.sessionCleanupLoop()
+
+	return b
 }
 
 // AddHook registers a hook for extending broker behavior.
@@ -308,4 +313,22 @@ func (b *Broker) Publish(topic string, payload []byte, retain bool) {
 // generateClientID generates a unique client ID.
 func generateClientID() string {
 	return fmt.Sprintf("auto-%d", time.Now().UnixNano())
+}
+
+// sessionCleanupLoop periodically removes expired sessions.
+func (b *Broker) sessionCleanupLoop() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-b.ctx.Done():
+			return
+		case <-ticker.C:
+			expired := b.sessions.CleanExpired()
+			for _, clientID := range expired {
+				b.hooks.OnSessionEnded(b.ctx, clientID)
+			}
+		}
+	}
 }

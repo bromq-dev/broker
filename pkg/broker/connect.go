@@ -23,6 +23,15 @@ func (b *Broker) handleConnect(client *Client, pkt *packet.Connect) error {
 		client.maxPacketSize = *pkt.Properties.MaxPacketSize
 	}
 
+	// Validate client ID length (protect against DoS)
+	const maxClientIDLen = 256 // Reasonable limit, spec allows up to 65535
+	if len(client.clientID) > maxClientIDLen {
+		if pkt.ProtocolVersion == packet.Version5 {
+			return b.sendConnackAndClose(client, pkt.ProtocolVersion, false, byte(packet.ReasonClientIDNotValid))
+		}
+		return b.sendConnackAndClose(client, pkt.ProtocolVersion, false, byte(packet.ConnackIdentifierRejected))
+	}
+
 	// Generate client ID if empty
 	if client.clientID == "" {
 		if !pkt.CleanStart {

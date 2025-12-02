@@ -49,12 +49,23 @@ func (b *Broker) handlePublish(client *Client, pkt *packet.Publish) error {
 	// Handle QoS acknowledgments
 	switch pkt.QoS {
 	case packet.QoS1:
+		// For QoS1, always ack and route. DUP just means client is retrying,
+		// but we have no state to deduplicate - that's expected for QoS1.
+		// Only QoS2 provides true exactly-once via the 4-way handshake.
 		client.Send(&packet.Puback{
 			Version:  client.version,
 			PacketID: pkt.PacketID,
 		})
 	case packet.QoS2:
-		client.trackInbound(pkt)
+		// Try to track - returns false if already tracking (retransmission)
+		if !client.trackInbound(pkt) {
+			// DUP - resend PUBREC, don't reprocess
+			client.Send(&packet.Pubrec{
+				Version:  client.version,
+				PacketID: pkt.PacketID,
+			})
+			return nil
+		}
 		client.Send(&packet.Pubrec{
 			Version:  client.version,
 			PacketID: pkt.PacketID,

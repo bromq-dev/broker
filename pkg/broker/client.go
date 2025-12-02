@@ -226,12 +226,26 @@ func (c *Client) ackInflight(packetID uint16) *packet.Publish {
 	return nil
 }
 
-// trackInbound tracks an inbound QoS 2 message waiting for PUBREL.
-func (c *Client) trackInbound(pkt *packet.Publish) {
+// hasInbound checks if we're already tracking an inbound QoS 2 message.
+func (c *Client) hasInbound(packetID uint16) bool {
 	c.packetIDMu.Lock()
 	defer c.packetIDMu.Unlock()
 
+	_, ok := c.inFlightIn[packetID]
+	return ok
+}
+
+// trackInbound tracks an inbound QoS 2 message waiting for PUBREL.
+// Returns true if newly tracked, false if already existed (duplicate).
+func (c *Client) trackInbound(pkt *packet.Publish) bool {
+	c.packetIDMu.Lock()
+	defer c.packetIDMu.Unlock()
+
+	if _, exists := c.inFlightIn[pkt.PacketID]; exists {
+		return false // Already tracking - duplicate
+	}
 	c.inFlightIn[pkt.PacketID] = pkt
+	return true
 }
 
 // releaseInbound releases an inbound QoS 2 message after PUBREL.
