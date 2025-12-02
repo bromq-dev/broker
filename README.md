@@ -24,12 +24,11 @@ Stress test comparing against popular MQTT brokers. All tests run with identical
 
 | Broker | Memory | CPU | Delivery | Throughput | P50 Latency | P99 Latency |
 |--------|--------|-----|----------|------------|-------------|-------------|
-| **This broker** | 338 MB | 391% | 100.3% | 166K msg/s | 83ms | 1.1s |
-| Mochi MQTT | 854 MB | 409% | 102.9% | 113K msg/s | 287ms | 1.5s |
-| Mosquitto | 557 MB | 90% | 100.7% | 74K msg/s | 1.4s | 2.4s |
-| EMQX | 7.4 GB | 399% | 12.3% | 18K msg/s | 5.6s | 42s |
+| **This broker** | 519 MB | 389% | 99.4% | 158K msg/s | 131ms | 757ms |
+| Mochi MQTT | 956 MB | 410% | 103.3% | 103K msg/s | 369ms | 1.9s |
+| Mosquitto | 530 MB | 92% | 101.2% | 70K msg/s | 1.6s | 2.5s |
 
-*EMQX tested with OOM protection disabled to allow fair comparison; default settings caused connection kills under load.*
+*EMQX omitted - default OOM protection kills connections under this load; disabling it causes 7GB+ memory usage with 12% delivery.*
 
 **Reproduce:**
 ```bash
@@ -38,7 +37,7 @@ testmqtt performance stress --publishers 2000 --subscribers 100 --topics 100 --r
 ```
 
 **Key Takeaways:**
-- **2.5x less memory** than Mochi MQTT (nearest Go competitor)
-- **1.5x higher throughput** than Mochi, **2.2x higher than Mosquitto**
-- **3-68x lower latency** than alternatives
+- **1.8x less memory** than Mochi MQTT (nearest Go competitor)
+- **1.5x higher throughput** than Mochi, **2.3x higher than Mosquitto**
+- **2.8x lower P50 latency** than Mochi, **12x lower than Mosquitto**
 - Stable memory usage under sustained load (no leaks or OOM)

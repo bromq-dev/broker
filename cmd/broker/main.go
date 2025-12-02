@@ -100,8 +100,10 @@ func init() {
 func main() {
 	flag.Parse()
 
-	// Create broker with default configuration
-	b := broker.New(nil)
+	// Create broker with tuned configuration for high throughput
+	config := broker.DefaultConfig()
+	config.ClientOutboundBuffer = 1024
+	b := broker.New(config)
 
 	// Add $SYS metrics - auto-starts on registration
 	_ = b.AddHook(new(hooks.SysHook), nil)
